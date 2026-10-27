@@ -7,15 +7,14 @@ Diseñado para **1280×720** y Android 13 (se escala al tamaño real de la venta
 
 - **Velocímetro** con anillo azul y velocidad en km/h leída del GPS de la unidad (pide permiso de ubicación la primera vez).
 - **Reloj y fecha.**
-- **Viaje** (datos reales del GPS): distancia, velocidad máxima y rumbo. Mantén pulsada la tarjeta para reiniciarlo.
-- **Mantenimiento:** aceite, frenos y próximo servicio. Toca la tarjeta para editar los valores.
-- **Reproductor** con carátula, título, artista, progreso y controles (Spotify, YouTube Music, etc.).
-- **Fila de apps:** Spotify, YouTube, Mensajes, Android Auto y el cajón con todas las apps (usa los iconos reales si están instaladas).
+- **Viaje:** ubicación actual (colonia/ciudad y departamento) y clima actual. Necesita internet en la unidad; el clima viene de Open-Meteo y el nombre del lugar del GPS.
+- **Reproductor** con carátula, título, artista, progreso y controles. Prioriza la app **Music BT** (música por Bluetooth); si no hay sesión de Music BT, usa cualquier otra que esté sonando (Spotify, YouTube Music, etc.). Si Music BT no publica sesión de medios, los botones envían teclas multimedia.
+- **Fila de apps:** Spotify, YouTube, Mensajes, **Android Auto (abre ZLINK5)** y el cajón con todas las apps (usa los iconos reales si están instaladas).
 - **Barra inferior:**
   - Apagar pantalla: deja la pantalla en negro con el brillo al mínimo. Tócala para despertarla. La música sigue sonando.
   - Asistente de voz
   - Ajustes
-  - Teléfono (marcador)
+  - Teléfono (abre la app **BT** de la unidad para llamadas)
   - Google Maps
   - Modo nocturno: oscurece los colores y baja el brillo de la ventana. Vuelve a tocarlo para quitarlo.
 - Sin OBD2 por ahora, así que no hay consumo ni temperatura del motor.
