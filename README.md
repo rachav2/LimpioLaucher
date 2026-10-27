@@ -1,17 +1,24 @@
 # Civic Launcher
 
 Launcher Android para pantallas chinas de auto, con el tema oscuro azul del **Honda Civic 2012**.
-Diseñado para **1280×720** y Android 13 (se escala solo a otras resoluciones).
+Diseñado para **1280×720** y Android 13 (se escala al tamaño real de la ventana).
 
 ## Qué incluye
 
-- Barra lateral: inicio, Spotify, Google Maps (usa sus iconos reales si están instaladas), teléfono y cajón de apps.
-- Velocidad en km/h leída del **GPS** de la unidad (pide permiso de ubicación la primera vez).
-- Reloj y fecha.
-- Tarjeta de **mantenimiento**: mantén pulsada la tarjeta para editar "Aceite motor" y "Próximo servicio".
-- Reproductor con carátula, título, artista, progreso y controles (Spotify, YouTube Music, etc.).
-- Dock inferior: Navegación, Música, Teléfono, Android Auto y Ajustes.
-- Sin OBD2 por ahora.
+- **Velocímetro** con anillo azul y velocidad en km/h leída del GPS de la unidad (pide permiso de ubicación la primera vez).
+- **Reloj y fecha.**
+- **Viaje** (datos reales del GPS): distancia, velocidad máxima y rumbo. Mantén pulsada la tarjeta para reiniciarlo.
+- **Mantenimiento:** aceite, frenos y próximo servicio. Toca la tarjeta para editar los valores.
+- **Reproductor** con carátula, título, artista, progreso y controles (Spotify, YouTube Music, etc.).
+- **Fila de apps:** Spotify, YouTube, Mensajes, Android Auto y el cajón con todas las apps (usa los iconos reales si están instaladas).
+- **Barra inferior:**
+  - Apagar pantalla: deja la pantalla en negro con el brillo al mínimo. Tócala para despertarla. La música sigue sonando.
+  - Asistente de voz
+  - Ajustes
+  - Teléfono (marcador)
+  - Google Maps
+  - Modo nocturno: oscurece los colores y baja el brillo de la ventana. Vuelve a tocarlo para quitarlo.
+- Sin OBD2 por ahora, así que no hay consumo ni temperatura del motor.
 
 ## Compilar el APK (sin instalar nada)
 
@@ -38,6 +45,7 @@ Android exige un permiso especial para leer la canción que suena:
 
 ## Personalizar
 
-- Nombre del auto: `buildTitle()` en `MainActivity.kt`.
+- Nombre del auto: `buildVehicleCard()` en `MainActivity.kt`.
 - Foto del auto: reemplaza `app/src/main/res/drawable-nodpi/car.png`.
 - Colores: constantes al inicio de `MainActivity.kt`.
+- Intensidad del modo nocturno: `0x8C000000` en `buildOverlays()` y `0.25f` en `applyBrightness()`.
