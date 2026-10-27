@@ -2,7 +2,6 @@ package com.rachav2.civiclauncher
 
 import android.Manifest
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -19,6 +18,7 @@ import android.graphics.drawable.GradientDrawable
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
@@ -35,6 +35,7 @@ import android.speech.RecognizerIntent
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -42,7 +43,6 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.BaseAdapter
-import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.GridView
 import android.widget.ImageView
@@ -92,13 +92,8 @@ class MainActivity : Activity() {
     private lateinit var ring: SpeedRingView
     private lateinit var speedText: TextView
     private lateinit var dateText: TextView
-    private lateinit var tripDistText: TextView
-    private lateinit var tripMaxText: TextView
-    private lateinit var headingText: TextView
-    private lateinit var oilKmText: TextView
-    private lateinit var oilMonthsText: TextView
-    private lateinit var brakesText: TextView
-    private lateinit var serviceText: TextView
+    private lateinit var locationText: TextView
+    private lateinit var weatherText: TextView
     private lateinit var artView: ImageView
     private lateinit var titleText: TextView
     private lateinit var artistText: TextView
@@ -116,10 +111,17 @@ class MainActivity : Activity() {
 
     // ---- Estado ----
     private var nightMode = false
-    private var tripMeters = 0f
-    private var maxKmh = 0
-    private var lastLoc: Location? = null
     private var lastDate = ""
+
+    // ---- Ubicación y clima ----
+    private var placeName: String? = null
+    private var weatherLabel: String? = null
+    private var geoLoc: Location? = null
+    private var geoTime = 0L
+    private var weatherLoc: Location? = null
+    private var weatherTime = 0L
+    private var geoBusy = false
+    private var weatherBusy = false
 
     // ---- Medios ----
     private var sessionManager: MediaSessionManager? = null
@@ -165,15 +167,7 @@ class MainActivity : Activity() {
             val shown = if (kmh < 2f) 0 else kmh.roundToInt()
             speedText.text = shown.toString()
             ring.setSpeed(shown)
-
-            val prev = lastLoc
-            if (prev != null && kmh >= 2f && location.accuracy < 40f) {
-                tripMeters += prev.distanceTo(location)
-            }
-            lastLoc = location
-            if (shown > maxKmh) maxKmh = shown
-            if (location.hasBearing() && kmh >= 5f) headingText.text = compass(location.bearing)
-            updateTripViews()
+            refreshPlaceAndWeather(location)
         }
     }
 
@@ -190,8 +184,8 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("civic", Context.MODE_PRIVATE)
         nightMode = prefs.getBoolean("night", false)
-        tripMeters = prefs.getFloat("trip_m", 0f)
-        maxKmh = prefs.getInt("max_kmh", 0)
+        placeName = prefs.getString("place", null)
+        weatherLabel = prefs.getString("weather", null)
 
         root = FrameLayout(this)
         root.background = GradientDrawable(
@@ -231,7 +225,6 @@ class MainActivity : Activity() {
         resumed = false
         handler.removeCallbacks(ticker)
         stopGps()
-        prefs.edit().putFloat("trip_m", tripMeters).putInt("max_kmh", maxKmh).apply()
         try {
             sessionManager?.removeOnActiveSessionsChangedListener(sessionsListener)
         } catch (e: Exception) {
@@ -378,7 +371,6 @@ class MainActivity : Activity() {
         buildClockCard()
         buildTripCard()
         buildDockCard()
-        buildMaintenanceCard()
         buildMediaCard()
         buildDrawer()
         buildBottomBar()
@@ -395,6 +387,7 @@ class MainActivity : Activity() {
         applyNight()
         updateTripViews()
         updateDate()
+        seedLocation()
     }
 
     // ---- Tarjeta del vehículo (velocímetro) ----
@@ -412,21 +405,23 @@ class MainActivity : Activity() {
         title.addView(label("Civic 2012", 30f, lightBlue, true))
         root.addView(title, lp(44f, 36f, 260f, 44f))
 
-        ring = SpeedRingView(this, 14f * ss)
-        root.addView(ring, lp(150f, 74f, 240f, 240f))
+        // El velocímetro queda arriba y el carro debajo, sin que se toquen
+        // (anillo: y 84..284; carro: y 294..450).
+        ring = SpeedRingView(this, 12f * ss)
+        root.addView(ring, lp(170f, 84f, 200f, 200f))
+
+        speedText = label("0", 80f, Color.WHITE, true)
+        speedText.gravity = Gravity.CENTER
+        root.addView(speedText, lp(170f, 128f, 200f, 86f))
+
+        val unit = label("km/h", 26f, textMuted)
+        unit.gravity = Gravity.CENTER
+        root.addView(unit, lp(170f, 214f, 200f, 30f))
 
         val car = ImageView(this)
         car.setImageResource(R.drawable.car)
         car.scaleType = ImageView.ScaleType.FIT_CENTER
-        root.addView(car, lp(70f, 256f, 400f, 204f))
-
-        speedText = label("0", 96f, Color.WHITE, true)
-        speedText.gravity = Gravity.CENTER
-        root.addView(speedText, lp(150f, 144f, 240f, 100f))
-
-        val unit = label("km/h", 30f, textMuted)
-        unit.gravity = Gravity.CENTER
-        root.addView(unit, lp(150f, 246f, 240f, 34f))
+        root.addView(car, lp(70f, 294f, 400f, 156f))
     }
 
     // ---- Reloj ----
@@ -470,29 +465,19 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---- Viaje (datos reales del GPS) ----
+    // ---- Viaje: ubicación y clima actuales ----
 
-    private fun statRow(name: String, value: TextView): LinearLayout {
-        val row = LinearLayout(this)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.gravity = Gravity.CENTER_VERTICAL
-        row.addView(label(name, 22f, textMuted), LinearLayout.LayoutParams(0, WC, 1f))
-        value.gravity = Gravity.END
-        row.addView(value, LinearLayout.LayoutParams(WC, WC))
-        return row
+    private fun infoBlock(name: String, value: TextView): LinearLayout {
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        col.addView(label(name, 20f, textMuted))
+        value.maxLines = 2
+        col.addView(value, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(4f) })
+        return col
     }
 
     private fun buildTripCard() {
-        val c = card(540f, 210f, 340f, 250f)
-        c.setOnLongClickListener {
-            tripMeters = 0f
-            maxKmh = 0
-            headingText.text = "—"
-            lastLoc = null
-            updateTripViews()
-            toast("Viaje reiniciado")
-            true
-        }
+        card(540f, 210f, 340f, 250f)
 
         val head = LinearLayout(this)
         head.orientation = LinearLayout.HORIZONTAL
@@ -504,27 +489,171 @@ class MainActivity : Activity() {
         head.addView(label("Viaje", 28f, Color.WHITE, true))
         root.addView(head, lp(564f, 228f, 290f, 38f))
 
-        tripDistText = label("0.0 km", 30f, Color.WHITE, true)
-        tripMaxText = label("0 km/h", 30f, Color.WHITE, true)
-        headingText = label("—", 30f, Color.WHITE, true)
+        locationText = label("", 26f, Color.WHITE, true)
+        weatherText = label("", 26f, Color.WHITE, true)
 
         val rows = LinearLayout(this)
         rows.orientation = LinearLayout.VERTICAL
-        rows.addView(statRow("Distancia", tripDistText), LinearLayout.LayoutParams(MP, px(54f)))
-        rows.addView(statRow("Vel. máxima", tripMaxText), LinearLayout.LayoutParams(MP, px(54f)))
-        rows.addView(statRow("Rumbo", headingText), LinearLayout.LayoutParams(MP, px(54f)))
+        rows.addView(
+            infoBlock("Ubicación actual", locationText),
+            LinearLayout.LayoutParams(MP, px(84f))
+        )
+        rows.addView(
+            infoBlock("Clima actual", weatherText),
+            LinearLayout.LayoutParams(MP, px(84f))
+        )
         root.addView(rows, lp(564f, 280f, 292f, 170f))
     }
 
     private fun updateTripViews() {
-        tripDistText.text = String.format(Locale.US, "%.1f km", tripMeters / 1000f)
-        tripMaxText.text = "$maxKmh km/h"
+        locationText.text = placeName ?: "Buscando ubicación…"
+        weatherText.text = weatherLabel ?: "Obteniendo clima…"
     }
 
-    private fun compass(bearing: Float): String {
-        val names = arrayOf("N", "NE", "E", "SE", "S", "SO", "O", "NO")
-        val idx = (((bearing + 22.5f) / 45f).toInt()) % 8
-        return names[idx]
+    /** Muestra enseguida la última posición conocida, sin esperar al primer fix del GPS. */
+    private fun seedLocation() {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
+        try {
+            val last = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+                .mapNotNull { p ->
+                    try {
+                        locationManager.getLastKnownLocation(p)
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+                .maxByOrNull { it.time }
+            if (last != null) refreshPlaceAndWeather(last)
+        } catch (e: Exception) {
+            // sin posición conocida
+        }
+    }
+
+    private fun refreshPlaceAndWeather(loc: Location) {
+        val now = SystemClock.elapsedRealtime()
+
+        val g = geoLoc
+        if (!geoBusy && (g == null || loc.distanceTo(g) > 500f || now - geoTime > 15 * 60_000L)) {
+            geoBusy = true
+            geoLoc = loc
+            geoTime = now
+            Thread {
+                val name = reverseGeocode(loc.latitude, loc.longitude)
+                handler.post {
+                    geoBusy = false
+                    if (name != null) {
+                        placeName = name
+                        prefs.edit().putString("place", name).apply()
+                    } else {
+                        geoTime = 0L // reintenta en la siguiente lectura
+                    }
+                    if (uiReady) updateTripViews()
+                }
+            }.start()
+        }
+
+        val w = weatherLoc
+        if (!weatherBusy && (w == null || loc.distanceTo(w) > 3000f || now - weatherTime > 15 * 60_000L)) {
+            weatherBusy = true
+            weatherLoc = loc
+            weatherTime = now
+            Thread {
+                val text = fetchWeather(loc.latitude, loc.longitude)
+                handler.post {
+                    weatherBusy = false
+                    if (text != null) {
+                        weatherLabel = text
+                        prefs.edit().putString("weather", text).apply()
+                    } else {
+                        weatherTime = 0L
+                    }
+                    if (uiReady) updateTripViews()
+                }
+            }.start()
+        }
+    }
+
+    private fun httpGet(url: String): String? = try {
+        val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        c.connectTimeout = 8000
+        c.readTimeout = 8000
+        c.setRequestProperty("User-Agent", "CivicLauncher/1.0 (Android)")
+        c.setRequestProperty("Accept-Language", "es")
+        try {
+            if (c.responseCode == 200) c.inputStream.bufferedReader().use { it.readText() } else null
+        } finally {
+            c.disconnect()
+        }
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Nombre del lugar (colonia/ciudad y departamento). Corre en un hilo aparte. */
+    @Suppress("DEPRECATION")
+    private fun reverseGeocode(lat: Double, lon: Double): String? {
+        try {
+            if (android.location.Geocoder.isPresent()) {
+                val list = android.location.Geocoder(this, Locale("es")).getFromLocation(lat, lon, 1)
+                val a = list?.firstOrNull()
+                if (a != null) {
+                    val city = a.locality ?: a.subLocality ?: a.subAdminArea
+                    val state = a.adminArea
+                    val s = listOfNotNull(city, state).distinct().joinToString(", ")
+                    if (s.isNotEmpty()) return s
+                }
+            }
+        } catch (e: Exception) {
+            // se prueba con el servicio web
+        }
+        val body = httpGet(
+            String.format(
+                Locale.US,
+                "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=14&addressdetails=1&accept-language=es&lat=%.5f&lon=%.5f",
+                lat, lon
+            )
+        ) ?: return null
+        return try {
+            val a = org.json.JSONObject(body).getJSONObject("address")
+            val keys = listOf("suburb", "neighbourhood", "city_district", "city", "town", "village", "municipality", "county")
+            val place = keys.firstNotNullOfOrNull { k -> a.optString(k).takeIf { it.isNotEmpty() } }
+            val state = a.optString("state").takeIf { it.isNotEmpty() }
+            listOfNotNull(place, state).distinct().joinToString(", ").ifEmpty { null }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Clima actual desde Open-Meteo (gratis, sin clave). Corre en un hilo aparte. */
+    private fun fetchWeather(lat: Double, lon: Double): String? {
+        val body = httpGet(
+            String.format(
+                Locale.US,
+                "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code&timezone=auto",
+                lat, lon
+            )
+        ) ?: return null
+        return try {
+            val cur = org.json.JSONObject(body).getJSONObject("current")
+            val t = cur.getDouble("temperature_2m").roundToInt()
+            "$t°C · ${weatherDescription(cur.getInt("weather_code"))}"
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun weatherDescription(code: Int): String = when (code) {
+        0 -> "Despejado"
+        1 -> "Mayormente despejado"
+        2 -> "Parcialmente nublado"
+        3 -> "Nublado"
+        45, 48 -> "Niebla"
+        51, 53, 55, 56, 57 -> "Llovizna"
+        61, 63, 65, 66, 67 -> "Lluvia"
+        71, 73, 75, 77 -> "Nieve"
+        80, 81, 82 -> "Chubascos"
+        85, 86 -> "Nevadas"
+        95, 96, 99 -> "Tormenta"
+        else -> "Variable"
     }
 
     // ---- Dock de apps ----
@@ -555,7 +684,7 @@ class MainActivity : Activity() {
         val appsIcon = iconView(R.drawable.ic_apps, 76f, 0xFF2A3F66.toInt(), 18f)
 
         val cells = listOf(
-            dockCell("Spotify", dockSpotify) { openMusic() },
+            dockCell("Spotify", dockSpotify) { openSpotify() },
             dockCell("YouTube", dockYoutube) { openYoutube() },
             dockCell("Mensajes", dockMessages) { openMessages() },
             dockCell("Android Auto", dockAuto) { openAndroidAuto() },
@@ -570,7 +699,7 @@ class MainActivity : Activity() {
         bindAppIcon(dockSpotify, "com.spotify.music", R.drawable.ic_music, 0xFF1DB954.toInt())
         bindAppIcon(dockYoutube, "com.google.android.youtube", R.drawable.ic_play, 0xFFE02020.toInt())
         bindAppIcon(dockMessages, defaultSmsPackage(), R.drawable.ic_chat, 0xFF22C55E.toInt())
-        bindAppIcon(dockAuto, "com.google.android.projection.gearhead", R.drawable.ic_car, 0xFF3A7BD5.toInt())
+        bindAppIcon(dockAuto, findZlink()?.packageName, R.drawable.ic_car, 0xFF3A7BD5.toInt())
     }
 
     private fun bindAppIcon(v: ImageView, pkg: String?, fallbackRes: Int, fallbackBg: Int) {
@@ -605,124 +734,14 @@ class MainActivity : Activity() {
         null
     }
 
-    // ---- Mantenimiento ----
-
-    private fun maintRow(icon: Int, iconBg: Int, name: String, value: TextView, extra: TextView?): LinearLayout {
-        val row = LinearLayout(this)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.gravity = Gravity.CENTER_VERTICAL
-        row.isClickable = true
-        row.setOnClickListener { showEditDialog() }
-
-        row.addView(
-            iconView(icon, 52f, iconBg, 12f),
-            LinearLayout.LayoutParams(px(52f), px(52f)).apply { rightMargin = px(16f) }
-        )
-
-        val col = LinearLayout(this)
-        col.orientation = LinearLayout.VERTICAL
-        col.addView(label(name, 20f, textMuted))
-        col.addView(value, LinearLayout.LayoutParams(WC, WC).apply { topMargin = px(4f) })
-        row.addView(col, LinearLayout.LayoutParams(0, WC, 1f))
-
-        if (extra != null) {
-            row.addView(extra, LinearLayout.LayoutParams(WC, WC).apply { rightMargin = px(8f) })
-        }
-        row.addView(
-            iconView(R.drawable.ic_chevron, 28f, null, 0f, textMuted),
-            LinearLayout.LayoutParams(px(28f), px(28f))
-        )
-        return row
-    }
-
-    private fun divider(): View {
-        val d = View(this)
-        d.setBackgroundColor(strokeColor)
-        return d
-    }
-
-    private fun buildMaintenanceCard() {
-        card(900f, 20f, 360f, 300f)
-
-        val head = LinearLayout(this)
-        head.orientation = LinearLayout.HORIZONTAL
-        head.gravity = Gravity.CENTER_VERTICAL
-        head.addView(
-            iconView(R.drawable.ic_wrench, 32f, null, 0f, Color.WHITE),
-            LinearLayout.LayoutParams(px(32f), px(32f)).apply { rightMargin = px(14f) }
-        )
-        head.addView(label("Mantenimiento", 28f, Color.WHITE, true))
-        root.addView(head, lp(924f, 36f, 320f, 38f))
-
-        oilKmText = label(prefs.getString("oil_km", "7,500 km") ?: "", 26f, Color.WHITE, true)
-        oilMonthsText = label(prefs.getString("oil_months", "2 meses") ?: "", 22f, textMuted)
-        brakesText = label(prefs.getString("brakes", "15,000 km") ?: "", 26f, Color.WHITE, true)
-        serviceText = label(prefs.getString("service", "12,500 km") ?: "", 26f, Color.WHITE, true)
-
-        val rows = LinearLayout(this)
-        rows.orientation = LinearLayout.VERTICAL
-        rows.addView(
-            maintRow(R.drawable.ic_wrench, 0xFF22A06B.toInt(), "Aceite motor", oilKmText, oilMonthsText),
-            LinearLayout.LayoutParams(MP, px(72f))
-        )
-        rows.addView(divider(), LinearLayout.LayoutParams(MP, max(1, px(1.5f))))
-        rows.addView(
-            maintRow(R.drawable.ic_settings, 0xFF5B6678.toInt(), "Revisión de frenos", brakesText, null),
-            LinearLayout.LayoutParams(MP, px(72f))
-        )
-        rows.addView(divider(), LinearLayout.LayoutParams(MP, max(1, px(1.5f))))
-        rows.addView(
-            maintRow(R.drawable.ic_calendar, 0xFF3A7BD5.toInt(), "Próximo servicio", serviceText, null),
-            LinearLayout.LayoutParams(MP, px(72f))
-        )
-        root.addView(rows, lp(922f, 84f, 316f, 224f))
-    }
-
-    private fun showEditDialog() {
-        val box = LinearLayout(this)
-        box.orientation = LinearLayout.VERTICAL
-        box.setPadding(px(24f), px(12f), px(24f), 0)
-
-        fun field(hint: String, current: CharSequence): EditText {
-            val e = EditText(this)
-            e.hint = hint
-            e.setText(current)
-            e.setSingleLine()
-            box.addView(e)
-            return e
-        }
-
-        val oilKm = field("Aceite motor (ej. 7,500 km)", oilKmText.text)
-        val oilMonths = field("Aceite motor, tiempo (ej. 2 meses)", oilMonthsText.text)
-        val brakes = field("Revisión de frenos (ej. 15,000 km)", brakesText.text)
-        val service = field("Próximo servicio (ej. 12,500 km)", serviceText.text)
-
-        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-            .setTitle("Mantenimiento")
-            .setView(box)
-            .setPositiveButton("Guardar") { _, _ ->
-                prefs.edit()
-                    .putString("oil_km", oilKm.text.toString())
-                    .putString("oil_months", oilMonths.text.toString())
-                    .putString("brakes", brakes.text.toString())
-                    .putString("service", service.text.toString())
-                    .apply()
-                oilKmText.text = oilKm.text.toString()
-                oilMonthsText.text = oilMonths.text.toString()
-                brakesText.text = brakes.text.toString()
-                serviceText.text = service.text.toString()
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
-
     // ---- Reproductor ----
 
     private fun buildMediaCard() {
         val card = LinearLayout(this)
         card.orientation = LinearLayout.VERTICAL
+        card.gravity = Gravity.CENTER_HORIZONTAL
         card.background = panelBg()
-        val pad = px(20f)
+        val pad = px(24f)
         card.setPadding(pad, pad, pad, pad)
         card.setOnClickListener {
             if (!isListenerEnabled()) {
@@ -734,41 +753,35 @@ class MainActivity : Activity() {
             }
         }
 
-        val top = LinearLayout(this)
-        top.orientation = LinearLayout.HORIZONTAL
-        top.gravity = Gravity.CENTER_VERTICAL
-
         artView = ImageView(this)
         roundClip(artView, 0.16f)
-        top.addView(artView, LinearLayout.LayoutParams(px(104f), px(104f)))
+        card.addView(artView, LinearLayout.LayoutParams(px(ART_SIZE), px(ART_SIZE)))
 
-        val texts = LinearLayout(this)
-        texts.orientation = LinearLayout.VERTICAL
-        titleText = label("", 28f, Color.WHITE, true)
+        titleText = label("", 30f, Color.WHITE, true)
+        titleText.gravity = Gravity.CENTER
+        card.addView(titleText, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(22f) })
+
         artistText = label("", 22f, textMuted)
-        texts.addView(titleText)
-        texts.addView(artistText, LinearLayout.LayoutParams(WC, WC).apply { topMargin = px(6f) })
-        top.addView(
-            texts,
-            LinearLayout.LayoutParams(0, WC, 1f).apply { leftMargin = px(16f) }
-        )
-        card.addView(top)
+        artistText.gravity = Gravity.CENTER
+        card.addView(artistText, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(8f) })
 
         progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
         progressBar.max = 1000
         progressBar.progressTintList = ColorStateList.valueOf(blue)
         progressBar.progressBackgroundTintList = ColorStateList.valueOf(strokeColor)
-        card.addView(progressBar, LinearLayout.LayoutParams(MP, px(8f)).apply { topMargin = px(16f) })
+        card.addView(progressBar, LinearLayout.LayoutParams(MP, px(8f)).apply { topMargin = px(24f) })
 
         val controls = LinearLayout(this)
         controls.orientation = LinearLayout.HORIZONTAL
         controls.gravity = Gravity.CENTER
 
-        val prev = iconView(R.drawable.ic_prev, 52f, null, 6f)
-        prev.setOnClickListener { controller?.transportControls?.skipToPrevious() }
-        controls.addView(prev, LinearLayout.LayoutParams(px(52f), px(52f)))
+        val prev = iconView(R.drawable.ic_prev, 56f, null, 6f)
+        prev.setOnClickListener {
+            controller?.transportControls?.skipToPrevious() ?: sendMediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+        }
+        controls.addView(prev, LinearLayout.LayoutParams(px(56f), px(56f)))
 
-        playBtn = iconView(R.drawable.ic_play, 68f, null, 16f, blue)
+        playBtn = iconView(R.drawable.ic_play, 72f, null, 17f, blue)
         playBtn.background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(0x00000000)
@@ -777,7 +790,7 @@ class MainActivity : Activity() {
         playBtn.setOnClickListener {
             val c = controller
             if (c == null) {
-                openMusic()
+                sendMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
             } else if (isPlaying) {
                 c.transportControls.pause()
             } else {
@@ -786,19 +799,33 @@ class MainActivity : Activity() {
         }
         controls.addView(
             playBtn,
-            LinearLayout.LayoutParams(px(68f), px(68f)).apply {
-                leftMargin = px(30f)
-                rightMargin = px(30f)
+            LinearLayout.LayoutParams(px(72f), px(72f)).apply {
+                leftMargin = px(28f)
+                rightMargin = px(28f)
             }
         )
 
-        val next = iconView(R.drawable.ic_next, 52f, null, 6f)
-        next.setOnClickListener { controller?.transportControls?.skipToNext() }
-        controls.addView(next, LinearLayout.LayoutParams(px(52f), px(52f)))
+        val next = iconView(R.drawable.ic_next, 56f, null, 6f)
+        next.setOnClickListener {
+            controller?.transportControls?.skipToNext() ?: sendMediaKey(KeyEvent.KEYCODE_MEDIA_NEXT)
+        }
+        controls.addView(next, LinearLayout.LayoutParams(px(56f), px(56f)))
 
-        card.addView(controls, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(12f) })
+        card.addView(controls, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(26f) })
 
-        root.addView(card, lp(900f, 340f, 360f, 280f))
+        // Ocupa toda la columna derecha (antes compartía el espacio con Mantenimiento)
+        root.addView(card, lp(900f, 20f, 360f, 600f))
+    }
+
+    /** Respaldo para apps de música Bluetooth que no publican una sesión de medios. */
+    private fun sendMediaKey(code: Int) {
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, code))
+            am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
+        } catch (e: Exception) {
+            // nada que hacer
+        }
     }
 
     // ---- Barra inferior ----
@@ -992,12 +1019,54 @@ class MainActivity : Activity() {
         toast("No encontré una app de mapas. Elige una de la lista.")
     }
 
+    /** Busca una app instalada por el nombre con el que aparece en el cajón de aplicaciones. */
+    private fun findApp(exact: List<String>, contains: List<String> = emptyList(), pkgContains: String? = null): ComponentName? {
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val list = try {
+            packageManager.queryIntentActivities(intent, 0)
+        } catch (e: Exception) {
+            return null
+        }
+        val entries = list.map {
+            Triple(
+                it.loadLabel(packageManager).toString().trim().lowercase(),
+                ComponentName(it.activityInfo.packageName, it.activityInfo.name),
+                it.activityInfo.packageName.lowercase()
+            )
+        }
+        for (name in exact) {
+            entries.firstOrNull { it.first == name }?.let { return it.second }
+        }
+        for (part in contains) {
+            entries.firstOrNull { it.first.contains(part) }?.let { return it.second }
+        }
+        if (pkgContains != null) {
+            entries.firstOrNull { it.third.contains(pkgContains) }?.let { return it.second }
+        }
+        return null
+    }
+
+    private fun findMusicBt(): ComponentName? = findApp(MUSIC_BT_EXACT, MUSIC_BT_CONTAINS)
+    private fun findPhoneBt(): ComponentName? = findApp(PHONE_BT_EXACT)
+    private fun findZlink(): ComponentName? = findApp(ZLINK_EXACT, ZLINK_CONTAINS, "zlink")
+
+    private fun launchComponent(c: ComponentName): Boolean =
+        startSafe(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(c))
+
+    /** Música: primero "Music BT"; si no está instalada, Spotify y luego cualquier reproductor. */
     private fun openMusic() {
+        findMusicBt()?.let { if (launchComponent(it)) return }
         if (launchPackage("com.spotify.music")) return
         val music = Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC)
         if (startSafe(music)) return
         openDrawer()
-        toast("No encontré un reproductor de música. Elige una de la lista.")
+        toast("No encontré la app Music BT. Elige una de la lista.")
+    }
+
+    private fun openSpotify() {
+        if (launchPackage("com.spotify.music")) return
+        openDrawer()
+        toast("Spotify no está instalado. Elige una app de la lista.")
     }
 
     private fun openYoutube() {
@@ -1015,17 +1084,18 @@ class MainActivity : Activity() {
         toast("No encontré una app de mensajes. Elige una de la lista.")
     }
 
+    /** Teléfono: abre la app "BT" de la unidad (la de llamadas por Bluetooth). */
     private fun openPhone() {
-        if (!startSafe(Intent(Intent.ACTION_DIAL))) {
-            openDrawer()
-            toast("No encontré la app de teléfono. Elige una de la lista.")
-        }
+        findPhoneBt()?.let { if (launchComponent(it)) return }
+        openDrawer()
+        toast("No encontré la app BT. Elige una de la lista.")
     }
 
+    /** Android Auto: abre ZLINK5. */
     private fun openAndroidAuto() {
-        if (launchPackage("com.google.android.projection.gearhead")) return
+        findZlink()?.let { if (launchComponent(it)) return }
         openDrawer()
-        toast("Android Auto no está instalado. Elige tu app de conexión (CarPlay / Android Auto).")
+        toast("No encontré la app ZLINK5. Elige una de la lista.")
     }
 
     private fun openAssistant() {
@@ -1070,7 +1140,11 @@ class MainActivity : Activity() {
     }
 
     private fun pickController(list: List<MediaController>?) {
-        val pick = list?.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
+        val btPkg = findMusicBt()?.packageName
+        fun playing(c: MediaController) = c.playbackState?.state == PlaybackState.STATE_PLAYING
+        val pick = list?.firstOrNull { it.packageName == btPkg && playing(it) }
+            ?: list?.firstOrNull { playing(it) }
+            ?: list?.firstOrNull { it.packageName == btPkg }
             ?: list?.firstOrNull()
         setController(pick)
     }
@@ -1089,7 +1163,11 @@ class MainActivity : Activity() {
 
     private fun showIdle() {
         titleText.text = "Sin reproducción"
-        artistText.text = if (isListenerEnabled()) "Toca para abrir tu música" else "Toca para activar el acceso"
+        artistText.text = when {
+            !isListenerEnabled() -> "Toca para activar el acceso"
+            findMusicBt() != null -> "Toca para abrir Music BT"
+            else -> "Toca para abrir tu música"
+        }
         durationMs = 0L
         lastState = null
         isPlaying = false
@@ -1133,9 +1211,9 @@ class MainActivity : Activity() {
             artView.scaleType = ImageView.ScaleType.CENTER_CROP
             artView.setImageBitmap(bmp)
         } else {
-            val p = px(28f)
+            val p = px(56f)
             artView.setPadding(p, p, p, p)
-            artView.background = rounded(0xFF12294D.toInt(), 104f * 0.16f)
+            artView.background = rounded(0xFF12294D.toInt(), ART_SIZE * 0.16f)
             artView.scaleType = ImageView.ScaleType.FIT_CENTER
             artView.setColorFilter(textMuted)
             artView.setImageResource(R.drawable.ic_music)
@@ -1164,7 +1242,6 @@ class MainActivity : Activity() {
 
     private fun startGps() {
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
-        lastLoc = null
         try {
             locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locListener)
         } catch (e: Exception) {
@@ -1183,5 +1260,13 @@ class MainActivity : Activity() {
     private companion object {
         const val ICON_ID = 7001
         const val NAME_ID = 7002
+        const val ART_SIZE = 220f
+
+        // Nombres con los que aparecen las apps de la unidad en el cajón de aplicaciones.
+        val MUSIC_BT_EXACT = listOf("music bt", "musicbt", "bt music", "btmusic", "bt-music", "música bt", "musica bt", "bluetooth music")
+        val MUSIC_BT_CONTAINS = listOf("music bt", "musicbt", "bt music", "bluetooth music")
+        val PHONE_BT_EXACT = listOf("bt", "bt phone", "btphone", "bluetooth phone")
+        val ZLINK_EXACT = listOf("zlink5", "zlink 5", "zlink")
+        val ZLINK_CONTAINS = listOf("zlink")
     }
 }
