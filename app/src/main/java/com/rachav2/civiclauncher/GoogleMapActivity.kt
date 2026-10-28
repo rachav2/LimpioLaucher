@@ -1,252 +1,243 @@
 package com.rachav2.civiclauncher
 
-import android.Manifest
 import android.app.Activity
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.GoogleMap
-import com.google.android.gms.maps.MapView
-import com.google.android.gms.maps.OnMapReadyCallback
-import com.google.android.gms.maps.model.LatLng
-import com.google.android.gms.maps.model.MapStyleOptions
-import java.util.Locale
+import kotlin.math.abs
 
-class GoogleMapActivity : Activity(), OnMapReadyCallback {
-    private var mapView: MapView? = null
-    private var googleMap: GoogleMap? = null
+/** Segunda pantalla del launcher: mapa web integrado y selector de Google Maps/Waze. */
+class GoogleMapActivity : Activity() {
+    private val lightBlue = Color.rgb(108, 180, 255)
+    private val muted = Color.rgb(143, 166, 201)
+    private val panel = 0xCC12294F.toInt()
+    private val backgroundColor = Color.rgb(3, 10, 22)
+    private lateinit var root: LinearLayout
+    private lateinit var mapFrame: FrameLayout
+    private lateinit var mapWeb: WebView
     private lateinit var destinationInput: EditText
-    private lateinit var root: FrameLayout
-    private val locationRequestCode = 71
+    private lateinit var googleButton: Button
+    private lateinit var wazeButton: Button
+    private lateinit var statusText: TextView
+    private var provider = Provider.GOOGLE
+    private var downX = 0f
+    private var downY = 0f
+
+    private enum class Provider { GOOGLE, WAZE }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         hideSystemUi()
-        root = FrameLayout(this).apply { setBackgroundColor(Color.rgb(5, 12, 24)) }
-
-        if (!hasMapsApiKey()) {
-            setContentView(buildApiKeyNotice())
-            return
-        }
-
-        try {
-            val map = MapView(this)
-            mapView = map
-            map.onCreate(savedInstanceState)
-            root.addView(map, FrameLayout.LayoutParams(-1, -1))
-            root.addView(buildTopBar(), FrameLayout.LayoutParams(-1, dp(66), Gravity.TOP))
-            root.addView(buildBottomControls(), FrameLayout.LayoutParams(-1, dp(104), Gravity.BOTTOM))
-            setContentView(root)
-            map.getMapAsync(this)
-        } catch (e: Exception) {
-            mapView = null
-            setContentView(buildMapFallback("No se pudo iniciar el mapa integrado. Revisa la clave de Google Maps y los servicios de Google Play."))
-        }
+        buildDashboard()
+        loadMap()
     }
 
-    private fun hasMapsApiKey(): Boolean = try {
-        applicationInfo.metaData?.getString("com.google.android.geo.API_KEY")
-            ?.isNotBlank() == true
-    } catch (_: Exception) {
-        false
-    }
-
-    private fun buildApiKeyNotice(): View {
-        val column = LinearLayout(this).apply {
+    private fun buildDashboard() {
+        root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(36), dp(24), dp(36), dp(24))
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setBackgroundColor(backgroundColor)
         }
-        column.addView(TextView(this).apply {
-            text = "GOOGLE MAPS"
-            setTextColor(Color.rgb(108, 180, 255))
-            textSize = 28f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-        }, LinearLayout.LayoutParams(-1, -2))
-        column.addView(TextView(this).apply {
-            text = "Falta configurar la clave de Google Maps. Añade MAPS_API_KEY en los secretos del repositorio y vuelve a compilar. El launcher seguirá funcionando; mientras tanto puedes abrir Google Maps completo."
-            setTextColor(Color.WHITE)
-            textSize = 18f
-            gravity = Gravity.CENTER
-            setPadding(0, dp(20), 0, dp(24))
-        }, LinearLayout.LayoutParams(-1, -2))
-        column.addView(actionButton("Abrir Google Maps") { openGoogleMaps(null) },
-            LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(8) })
-        column.addView(actionButton("Volver al launcher") { finish() },
-            LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(10) })
-        return column
-    }
-
-    private fun buildMapFallback(message: String): View {
-        val column = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(36), dp(24), dp(36), dp(24))
-            setBackgroundColor(Color.rgb(5, 12, 24))
-        }
-        column.addView(TextView(this).apply {
-            text = "MAPA NO DISPONIBLE"
-            setTextColor(Color.rgb(108, 180, 255))
-            textSize = 26f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-        }, LinearLayout.LayoutParams(-1, -2))
-        column.addView(TextView(this).apply {
-            text = message
-            setTextColor(Color.WHITE)
-            textSize = 17f
-            gravity = Gravity.CENTER
-            setPadding(0, dp(18), 0, dp(22))
-        }, LinearLayout.LayoutParams(-1, -2))
-        column.addView(actionButton("Abrir Google Maps") { openGoogleMaps(null) },
-            LinearLayout.LayoutParams(-1, dp(54)))
-        column.addView(actionButton("Volver al launcher") { finish() },
-            LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(10) })
-        return column
-    }
-
-    private fun buildTopBar(): View {
-        val bar = LinearLayout(this).apply {
+        val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(22), dp(8), dp(22), dp(8))
-            setBackgroundColor(0xE6081428.toInt())
+            background = rounded(0xCC081528.toInt(), dp(18))
+            setPadding(dp(18), dp(8), dp(12), dp(8))
         }
-        val title = TextView(this).apply {
-            text = "CIVIC 2012  ·  GOOGLE MAPS"
-            setTextColor(Color.rgb(108, 180, 255))
-            textSize = 20f
-            typeface = Typeface.DEFAULT_BOLD
-        }
-        bar.addView(title, LinearLayout.LayoutParams(0, -1, 1f))
-        bar.addView(actionButton("Volver") { finish() }, LinearLayout.LayoutParams(dp(120), -1))
-        return bar
-    }
+        val titleColumn = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        titleColumn.addView(text("CIVIC 2012", 21f, lightBlue, true))
+        titleColumn.addView(text("PANTALLA DE NAVEGACIÓN", 11f, muted, true))
+        header.addView(titleColumn, LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(actionButton("⌂  Inicio") { finish() }, LinearLayout.LayoutParams(dp(112), dp(42)))
+        root.addView(header, LinearLayout.LayoutParams(-1, dp(62)))
 
-    private fun buildBottomControls(): View {
-        val bar = LinearLayout(this).apply {
+        val selector = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(18), dp(12), dp(18), dp(12))
-            setBackgroundColor(0xE6081428.toInt())
+            setPadding(dp(4), dp(8), dp(4), dp(8))
+        }
+        googleButton = actionButton("Google Maps") { chooseProvider(Provider.GOOGLE) }
+        wazeButton = actionButton("Waze") { chooseProvider(Provider.WAZE) }
+        selector.addView(googleButton, LinearLayout.LayoutParams(dp(150), dp(44)).apply { rightMargin = dp(8) })
+        selector.addView(wazeButton, LinearLayout.LayoutParams(dp(110), dp(44)))
+        statusText = text("Mapa integrado · vista web", 13f, muted)
+        selector.addView(statusText, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(14) })
+        root.addView(selector, LinearLayout.LayoutParams(-1, dp(60)))
+
+        mapFrame = FrameLayout(this).apply {
+            background = rounded(panel, dp(20), 0xFF1E3A66.toInt())
+            clipToOutline = true
+        }
+        mapWeb = WebView(this).apply {
+            setBackgroundColor(0xFF101F35.toInt())
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.loadsImagesAutomatically = true
+            settings.javaScriptCanOpenWindowsAutomatically = false
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    statusText.text = if (provider == Provider.GOOGLE)
+                        "Google Maps · integrado en el panel" else "Waze · mapa web integrado"
+                }
+                override fun onReceivedError(
+                    view: WebView?, request: android.webkit.WebResourceRequest?,
+                    error: android.webkit.WebResourceError?
+                ) {
+                    if (request?.isForMainFrame == true) statusText.text =
+                        "No se pudo cargar el mapa; revisa la conexión"
+                }
+            }
+            webChromeClient = WebChromeClient()
+        }
+        mapFrame.addView(mapWeb, FrameLayout.LayoutParams(-1, -1))
+        root.addView(mapFrame, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(9), 0, 0)
         }
         destinationInput = EditText(this).apply {
-            hint = "Buscar destino o dirección"
-            textSize = 17f
+            hint = "Buscar lugar o destino"
+            textSize = 15f
             setSingleLine(true)
             setTextColor(Color.WHITE)
-            setHintTextColor(0xFF9DB0CB.toInt())
+            setHintTextColor(muted)
             setPadding(dp(14), 0, dp(14), 0)
-            background = roundedInput()
+            background = rounded(0xFF101F35.toInt(), dp(12), 0xFF31547D.toInt())
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+            setOnEditorActionListener { _, _, _ -> loadMap(); true }
         }
-        bar.addView(destinationInput, LinearLayout.LayoutParams(0, -1, 1f).apply {
-            rightMargin = dp(12)
-        })
-        bar.addView(actionButton("Navegar") {
-            val query = destinationInput.text.toString().trim()
-            openGoogleMaps(query.ifBlank { null })
-        }, LinearLayout.LayoutParams(dp(160), -1))
-        return bar
+        controls.addView(destinationInput, LinearLayout.LayoutParams(0, dp(48), 1f).apply { rightMargin = dp(8) })
+        controls.addView(actionButton("Buscar") { loadMap() }, LinearLayout.LayoutParams(dp(100), dp(48)).apply { rightMargin = dp(8) })
+        controls.addView(actionButton("Abrir app ↗") { openSelectedApp() }, LinearLayout.LayoutParams(dp(132), dp(48)))
+        root.addView(controls, LinearLayout.LayoutParams(-1, dp(58)))
+
+        root.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(text("DESLIZA A LA DERECHA O PULSA INICIO PARA VOLVER", 10f, muted, true))
+        }, LinearLayout.LayoutParams(-1, dp(22)))
+        setContentView(root)
+        updateProviderButtons()
     }
 
-    private fun actionButton(textValue: String, action: () -> Unit): Button =
+    private fun chooseProvider(value: Provider) {
+        provider = value
+        updateProviderButtons()
+        loadMap()
+    }
+
+    private fun updateProviderButtons() {
+        googleButton.alpha = if (provider == Provider.GOOGLE) 1f else 0.68f
+        wazeButton.alpha = if (provider == Provider.WAZE) 1f else 0.68f
+        statusText.text = if (provider == Provider.GOOGLE) "Google Maps seleccionado" else "Waze seleccionado"
+    }
+
+    private fun loadMap() {
+        if (!::mapWeb.isInitialized) return
+        val query = destinationInput.text?.toString()?.trim().orEmpty()
+        val encoded = Uri.encode(query.ifBlank { "San Salvador, El Salvador" })
+        val url = if (provider == Provider.GOOGLE) {
+            "https://maps.google.com/maps?q=" + encoded + "&output=embed"
+        } else if (query.isBlank()) {
+            "https://embed.waze.com/iframe?zoom=12&lat=13.6929&lon=-89.2182&pin=1"
+        } else {
+            "https://www.waze.com/live-map/directions?to=" + Uri.encode(query)
+        }
+        mapWeb.loadUrl(url)
+    }
+
+    private fun openSelectedApp() {
+        val query = destinationInput.text?.toString()?.trim().orEmpty()
+        val intent = if (provider == Provider.GOOGLE) {
+            val uri = if (query.isBlank()) Uri.parse("geo:0,0") else
+                Uri.parse("google.navigation:q=" + Uri.encode(query) + "&mode=d")
+            Intent(Intent.ACTION_VIEW, uri).setPackage("com.google.android.apps.maps")
+        } else {
+            val uri = if (query.isBlank()) Uri.parse("https://waze.com/ul") else
+                Uri.parse("https://waze.com/ul?q=" + Uri.encode(query) + "&navigate=yes")
+            Intent(Intent.ACTION_VIEW, uri).setPackage("com.waze")
+        }
+        try {
+            if (intent.resolveActivity(packageManager) != null) {
+                startActivity(intent)
+            } else {
+                val label = if (provider == Provider.GOOGLE) "Google Maps" else "Waze"
+                Toast.makeText(this, label + " no está instalado; el mapa web seguirá disponible.", Toast.LENGTH_LONG).show()
+                try {
+                    val fallback = if (provider == Provider.GOOGLE) Uri.parse("geo:0,0") else Uri.parse("https://waze.com/ul")
+                    startActivity(Intent(Intent.ACTION_VIEW, fallback))
+                } catch (_: Exception) { }
+            }
+        } catch (_: Exception) {
+            Toast.makeText(this, "No se pudo abrir la aplicación de navegación.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { downX = event.rawX; downY = event.rawY }
+            MotionEvent.ACTION_UP -> {
+                val dx = event.rawX - downX
+                val dy = event.rawY - downY
+                if (dx > dp(110) && abs(dx) > abs(dy) * 1.35f) {
+                    finish()
+                    return true
+                }
+            }
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
+    private fun actionButton(label: String, action: () -> Unit): Button =
         Button(this).apply {
-            text = textValue
-            textSize = 16f
+            text = label
+            textSize = 13f
             isAllCaps = false
             setTextColor(Color.WHITE)
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xFF17457A.toInt())
-                cornerRadius = dp(12).toFloat()
-                setStroke(dp(1), 0xFF3B83D6.toInt())
-            }
+            background = rounded(0xFF17457A.toInt(), dp(12), 0xFF3B83D6.toInt())
             setOnClickListener { action() }
         }
 
-    private fun roundedInput(): android.graphics.drawable.Drawable =
+    private fun text(value: String, size: Float, color: Int, bold: Boolean = false): TextView =
+        TextView(this).apply {
+            text = value
+            setTextColor(color)
+            textSize = size
+            if (bold) typeface = Typeface.DEFAULT_BOLD
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+    private fun rounded(color: Int, radius: Int, stroke: Int = Color.TRANSPARENT): android.graphics.drawable.GradientDrawable =
         android.graphics.drawable.GradientDrawable().apply {
-            setColor(0xFF101F35.toInt())
-            cornerRadius = dp(12).toFloat()
-            setStroke(dp(1), 0xFF31547D.toInt())
+            setColor(color)
+            cornerRadius = radius.toFloat()
+            if (stroke != Color.TRANSPARENT) setStroke(dp(1), stroke)
         }
 
-    override fun onMapReady(map: GoogleMap) {
-        try {
-            googleMap = map
-        map.uiSettings.isCompassEnabled = true
-        map.uiSettings.isMapToolbarEnabled = false
-        map.uiSettings.isZoomControlsEnabled = false
-        map.isTrafficEnabled = true
-        map.setPadding(0, dp(72), 0, dp(112))
-        try {
-            map.setMapStyle(MapStyleOptions(
-                """[
-                  {"elementType":"geometry","stylers":[{"color":"#18263b"}]},
-                  {"elementType":"labels.text.fill","stylers":[{"color":"#9bb0cc"}]},
-                  {"elementType":"labels.text.stroke","stylers":[{"color":"#101b2d"}]},
-                  {"featureType":"road","elementType":"geometry","stylers":[{"color":"#344b68"}]},
-                  {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#2f8cff"}]},
-                  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#09172b"}]}
-                ]""".trimIndent()
-            ))
-        } catch (_: Exception) { }
-
-        val initial = lastKnownPosition() ?: LatLng(13.6929, -89.2182)
-        map.moveCamera(CameraUpdateFactory.newLatLngZoom(initial, if (lastKnownPosition() == null) 11f else 15f))
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            try { map.isMyLocationEnabled = true } catch (_: SecurityException) { }
-        } else {
-            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), locationRequestCode)
-        }
-        } catch (e: Exception) {
-            googleMap = null
-            setContentView(buildMapFallback("Google Maps no pudo cargar. Comprueba la clave de API, que Maps SDK for Android esté habilitado y que haya conexión a internet."))
-        }
-    }
-
-    private fun lastKnownPosition(): LatLng? {
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
-            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null
-        val manager = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
-        return listOf(android.location.LocationManager.GPS_PROVIDER, android.location.LocationManager.NETWORK_PROVIDER)
-            .mapNotNull { provider -> try { manager.getLastKnownLocation(provider) } catch (_: Exception) { null } }
-            .maxByOrNull { it.time }
-            ?.let { LatLng(it.latitude, it.longitude) }
-    }
-
-    private fun openGoogleMaps(query: String?) {
-        val uri = if (query.isNullOrBlank()) Uri.parse("geo:0,0") else
-            Uri.parse("google.navigation:q=${Uri.encode(query)}&mode=d")
-        val mapsIntent = Intent(Intent.ACTION_VIEW, uri).setPackage("com.google.android.apps.maps")
-        try {
-            startActivity(mapsIntent)
-        } catch (_: Exception) {
-            try {
-                startActivity(Intent(Intent.ACTION_VIEW, if (query.isNullOrBlank()) Uri.parse("geo:0,0") else Uri.parse("geo:0,0?q=${Uri.encode(query)}")))
-            } catch (_: Exception) {
-                Toast.makeText(this, "No encontré una aplicación de mapas instalada.", Toast.LENGTH_LONG).show()
-            }
-        }
-    }
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun hideSystemUi() {
-        if (android.os.Build.VERSION.SDK_INT >= 30) {
+        if (Build.VERSION.SDK_INT >= 30) {
             window.setDecorFitsSystemWindows(false)
             window.insetsController?.let {
                 it.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
@@ -254,31 +245,19 @@ class GoogleMapActivity : Activity(), OnMapReadyCallback {
             }
         } else {
             @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility =
-                View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         }
     }
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-
-    override fun onStart() { super.onStart(); mapView?.onStart() }
-    override fun onResume() { super.onResume(); mapView?.onResume() }
-    override fun onPause() { mapView?.onPause(); super.onPause() }
-    override fun onStop() { mapView?.onStop(); super.onStop() }
-    override fun onDestroy() { mapView?.onDestroy(); mapView = null; super.onDestroy() }
-    override fun onLowMemory() { super.onLowMemory(); mapView?.onLowMemory() }
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        mapView?.onSaveInstanceState(outState)
-    }
-
-    @Deprecated("Use the Activity Result API")
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == locationRequestCode && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            try { googleMap?.isMyLocationEnabled = true } catch (_: SecurityException) { }
-            lastKnownPosition()?.let { googleMap?.animateCamera(CameraUpdateFactory.newLatLngZoom(it, 15f)) }
+    override fun onResume() { super.onResume(); if (::mapWeb.isInitialized) mapWeb.onResume() }
+    override fun onPause() { if (::mapWeb.isInitialized) mapWeb.onPause(); super.onPause() }
+    override fun onDestroy() {
+        if (::mapWeb.isInitialized) {
+            mapFrame.removeView(mapWeb)
+            mapWeb.stopLoading()
+            mapWeb.destroy()
         }
+        super.onDestroy()
     }
 }
