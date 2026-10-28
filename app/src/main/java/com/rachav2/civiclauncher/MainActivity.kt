@@ -981,12 +981,20 @@ class MainActivity : Activity() {
                         toast("Panel oculto. Mantén pulsada un área vacía para recuperarlo.")
                     }
                     2 -> {
+                        val oldDx = xx(prefs.getFloat("panel.$id.x", 0f))
+                        val oldDy = yy(prefs.getFloat("panel.$id.y", 0f))
+                        root.childrenForPanel(id).forEach { view ->
+                            val lp = view.layoutParams as? FrameLayout.LayoutParams ?: return@forEach
+                            lp.leftMargin -= oldDx
+                            lp.topMargin -= oldDy
+                            view.layoutParams = lp
+                            view.visibility = View.VISIBLE
+                        }
                         prefs.edit()
                             .putBoolean("panel.$id.hidden", false)
                             .putFloat("panel.$id.x", 0f)
                             .putFloat("panel.$id.y", 0f)
                             .apply()
-                        configureMovablePanels()
                         toast("Panel restaurado a su posición original.")
                     }
                 }
@@ -1017,7 +1025,7 @@ class MainActivity : Activity() {
             .setItems(labels) { _, which ->
                 val id = hidden[which].id
                 prefs.edit().putBoolean("panel.$id.hidden", false).apply()
-                configureMovablePanels()
+                root.childrenForPanel(id).forEach { it.visibility = View.VISIBLE }
                 toast("Panel recuperado.")
             }
             .setNegativeButton("Cerrar", null)
