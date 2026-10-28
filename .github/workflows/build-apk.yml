@@ -1,10 +1,7 @@
 name: Build APK
 
 on:
-  push:
-    branches: [ main, master, 'feature/**' ]
-  pull_request:
-    branches: [ main, master ]
+  # Compile only when explicitly requested, after the batch of changes is complete.
   workflow_dispatch:
 
 jobs:
