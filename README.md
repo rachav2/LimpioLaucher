@@ -23,7 +23,7 @@ Diseñado para **1280×720** y Android 13 (se escala al tamaño real de la venta
 
 - **Dock dinámico:** muestra hasta cuatro aplicaciones recientes que se hayan abierto desde el launcher. El acceso **Todas las apps** permanece fijo. Android no permite conocer de forma fiable todas las apps abiertas por otros launchers sin conceder acceso de uso; esta versión registra los lanzamientos realizados desde Civic Launcher.
 - **Paneles movibles:** mantén presionada una tarjeta (vehículo, reloj, viaje, dock, reproductor o barra inferior) hasta que se active el arrastre; mueve el dedo y suelta para guardar la posición. Las posiciones se conservan entre reinicios. Los botones siguen funcionando con un toque normal.
-- **Mapa GPS offline:** desliza la pantalla principal hacia la izquierda para abrir el visor local. La ubicación se obtiene del GPS sin necesitar datos móviles. Usa **Cargar mapa MBTiles** para elegir el archivo desde Descargas/USB; la app lo copia a `Android/data/com.rachav2.civiclauncher/files/maps/el_salvador.mbtiles`. Debe ser un MBTiles **ráster** (teselas PNG/JPG) que incluya zoom 13; los MBTiles vectoriales PBF no funcionan con este visor sencillo. No se incluye cartografía de terceros en el APK.
+- **Google Maps integrado:** desliza la pantalla principal hacia la izquierda o toca el icono de Maps para abrir el mapa dentro de Civic Launcher. Muestra ubicación, tráfico disponible y estilo oscuro azul. El campo de destino abre la navegación giro a giro en la app Google Maps.
 
 ## Compilar el APK (sin instalar nada)
 
@@ -48,10 +48,15 @@ Android exige un permiso especial para leer la canción que suena:
 2. En Android 13, si aparece "Ajuste restringido" porque el APK se instaló fuera de Play Store:
    Ajustes > Aplicaciones > Civic Launcher > menú ⋮ > **Permitir ajustes restringidos**, y vuelve al paso anterior.
 
-## Conseguir un mapa offline
+## Configurar Google Maps
 
-- Puedes crear un MBTiles ráster con QGIS/MapTiler a partir de cartografía cuya licencia permita descargas y uso offline. Revisa siempre las condiciones de la fuente; el servidor estándar de teselas de OpenStreetMap prohíbe descargar masivamente teselas para uso offline.
-- Recursos para empezar: [BBBike: extractos de OpenStreetMap](https://extract.bbbike.org/?lang=es) y [guía de MBTiles ráster](https://milgps.com/userguide/frequently-asked-questions/creating-offline-maps/). Comprueba el formato antes de usar el archivo: no todo archivo `.mbtiles` es compatible.
+1. Crea o selecciona un proyecto en [Google Cloud Console](https://console.cloud.google.com/).
+2. Activa **Maps SDK for Android** y habilita la facturación del proyecto. Google Maps Platform puede aplicar cargos según el uso y las condiciones vigentes.
+3. Crea una clave API restringida a Maps SDK for Android. Para una configuración de producción, restringe también la clave al paquete `com.rachav2.civiclauncher` y a la huella SHA-1 del certificado con el que se firma el APK.
+4. En GitHub abre **Settings → Secrets and variables → Actions → New repository secret**. Crea el secreto `MAPS_API_KEY` con el valor de la clave. El workflow la lee desde el entorno y no guarda la clave en el código.
+5. Vuelve a ejecutar **Actions → Build APK** y descarga el artefacto nuevo. Si el secreto no está configurado, el APK compilará igualmente, pero la pantalla mostrará instrucciones y permitirá abrir Google Maps externo.
+
+El mapa se dibuja dentro de Civic Launcher con Maps SDK. El botón **Navegar** transfiere el destino a la app Google Maps para las indicaciones giro a giro; la navegación completa dentro de la propia interfaz requiere Navigation SDK, configuración y facturación adicionales. Consulta [Maps SDK para Android](https://developers.google.com/maps/documentation/android-sdk/overview), [configuración de la clave](https://developers.google.com/maps/documentation/android-sdk/get-api-key) y [Navigation SDK](https://developers.google.com/maps/documentation/navigation/android-sdk/overview).
 
 ## Personalizar
 
