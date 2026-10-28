@@ -255,8 +255,6 @@ class MainActivity : Activity() {
             wakeScreen()
         } else if (uiReady && drawer.visibility == View.VISIBLE) {
             closeDrawer()
-        } else {
-            super.onBackPressed()
         }
     }
 
