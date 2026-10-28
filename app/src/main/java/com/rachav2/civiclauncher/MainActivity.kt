@@ -35,6 +35,7 @@ import android.speech.RecognizerIntent
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -108,10 +109,16 @@ class MainActivity : Activity() {
     private lateinit var blackout: View
     private lateinit var drawer: FrameLayout
     private lateinit var drawerGrid: GridView
+    private lateinit var recentDock: LinearLayout
+    private lateinit var canWidgetHost: DashboardWidgetHost
+    private lateinit var canStatusText: TextView
 
     // ---- Estado ----
     private var nightMode = false
     private var lastDate = ""
+    private var canBusGateway: CanBusGateway? = null
+    private var swipeDownX = 0f
+    private var swipeDownY = 0f
 
     // ---- Ubicación y clima ----
     private var placeName: String? = null
@@ -218,11 +225,13 @@ class MainActivity : Activity() {
         handler.removeCallbacks(ticker)
         handler.post(ticker)
         if (uiReady) refreshDynamic()
+        startCanBusGateway()
     }
 
     override fun onPause() {
         super.onPause()
         resumed = false
+        stopCanBusGateway()
         handler.removeCallbacks(ticker)
         stopGps()
         try {
@@ -246,6 +255,8 @@ class MainActivity : Activity() {
             wakeScreen()
         } else if (uiReady && drawer.visibility == View.VISIBLE) {
             closeDrawer()
+        } else {
+            super.onBackPressed()
         }
     }
 
@@ -374,7 +385,9 @@ class MainActivity : Activity() {
         buildMediaCard()
         buildDrawer()
         buildBottomBar()
+        buildCanWidgetHost()
         buildOverlays()
+        installMapSwipeGesture()
 
         uiReady = true
         showIdle()
@@ -382,7 +395,7 @@ class MainActivity : Activity() {
     }
 
     private fun refreshDynamic() {
-        refreshShortcutIcons()
+        refreshRecentDock()
         setupMedia()
         applyNight()
         updateTripViews()
@@ -677,29 +690,57 @@ class MainActivity : Activity() {
         dock.gravity = Gravity.CENTER
         dock.background = panelBg()
 
-        dockSpotify = iconView(R.drawable.ic_music, 76f, 0xFF1DB954.toInt(), 16f)
-        dockYoutube = iconView(R.drawable.ic_play, 76f, 0xFFE02020.toInt(), 16f)
-        dockMessages = iconView(R.drawable.ic_chat, 76f, 0xFF22C55E.toInt(), 16f)
-        dockAuto = iconView(R.drawable.ic_car, 76f, 0xFF3A7BD5.toInt(), 16f)
-        val appsIcon = iconView(R.drawable.ic_apps, 76f, 0xFF2A3F66.toInt(), 18f)
+        recentDock = LinearLayout(this)
+        recentDock.orientation = LinearLayout.HORIZONTAL
+        recentDock.gravity = Gravity.CENTER
+        dock.addView(recentDock, LinearLayout.LayoutParams(0, MP, 1f))
 
-        val cells = listOf(
-            dockCell("Spotify", dockSpotify) { openSpotify() },
-            dockCell("YouTube", dockYoutube) { openYoutube() },
-            dockCell("Mensajes", dockMessages) { openMessages() },
-            dockCell("Android Auto", dockAuto) { openAndroidAuto() },
-            dockCell("Apps", appsIcon) { toggleDrawer() }
-        )
-        for (c in cells) dock.addView(c, LinearLayout.LayoutParams(0, MP, 1f))
+        val appsIcon = iconView(R.drawable.ic_apps, 76f, 0xFF2A3F66.toInt(), 18f)
+        dock.addView(dockCell("Todas las apps", appsIcon) { toggleDrawer() },
+            LinearLayout.LayoutParams(px(170f), MP))
         root.addView(dock, lp(20f, 480f, 860f, 140f))
+        refreshRecentDock()
     }
 
-    /** Usa el icono real de la app si está instalada; si no, un icono genérico de color. */
-    private fun refreshShortcutIcons() {
-        bindAppIcon(dockSpotify, "com.spotify.music", R.drawable.ic_music, 0xFF1DB954.toInt())
-        bindAppIcon(dockYoutube, "com.google.android.youtube", R.drawable.ic_play, 0xFFE02020.toInt())
-        bindAppIcon(dockMessages, defaultSmsPackage(), R.drawable.ic_chat, 0xFF22C55E.toInt())
-        bindAppIcon(dockAuto, findZlink()?.packageName, R.drawable.ic_car, 0xFF3A7BD5.toInt())
+    /** El dock recuerda apps abiertas desde el launcher y siempre reserva el último espacio al cajón. */
+    private fun refreshRecentDock() {
+        if (!::recentDock.isInitialized) return
+        recentDock.removeAllViews()
+        val saved = prefs.getString("recent_packages", "")!!.split("|").filter { it.isNotBlank() }
+        val launcherApps = loadApps().associateBy { it.component.packageName }
+        val recent = saved.distinct().mapNotNull { launcherApps[it] }.take(4)
+        val fallback = listOf("com.spotify.music", "com.google.android.youtube")
+            .filter { pkg -> launcherApps.containsKey(pkg) && recent.none { it.component.packageName == pkg } }
+        val chosen = (recent + fallback.mapNotNull { launcherApps[it] }).take(4)
+        if (chosen.isEmpty()) {
+            val hint = label("Abre una app para fijarla aquí", 17f, textMuted)
+            hint.gravity = Gravity.CENTER
+            recentDock.addView(hint, LinearLayout.LayoutParams(MP, MP))
+            return
+        }
+        chosen.forEach { app ->
+            val cell = LinearLayout(this)
+            cell.orientation = LinearLayout.VERTICAL
+            cell.gravity = Gravity.CENTER
+            cell.isClickable = true
+            cell.setOnClickListener { launchComponent(app.component) }
+            val icon = ImageView(this)
+            icon.setImageDrawable(app.icon)
+            icon.scaleType = ImageView.ScaleType.FIT_CENTER
+            cell.addView(icon, LinearLayout.LayoutParams(px(58f), px(58f)))
+            val title = label(app.label, 16f, Color.WHITE)
+            title.gravity = Gravity.CENTER
+            cell.addView(title, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(5f) })
+            recentDock.addView(cell, LinearLayout.LayoutParams(0, MP, 1f))
+        }
+    }
+
+    private fun rememberRecentPackage(pkg: String) {
+        if (pkg == packageName) return
+        val current = prefs.getString("recent_packages", "")!!.split("|").filter { it.isNotBlank() }
+        val updated = (listOf(pkg) + current.filterNot { it == pkg }).take(12)
+        prefs.edit().putString("recent_packages", updated.joinToString("|")).apply()
+        if (uiReady) refreshRecentDock()
     }
 
     private fun bindAppIcon(v: ImageView, pkg: String?, fallbackRes: Int, fallbackBg: Int) {
@@ -858,6 +899,62 @@ class MainActivity : Activity() {
         root.addView(bar, lp(20f, 636f, 1240f, 68f))
     }
 
+
+    // ---- Widget CANbus: puente pasivo, sin transmitir al bus del vehículo ----
+
+    private fun buildCanWidgetHost() {
+        canWidgetHost = DashboardWidgetHost(this, prefs, ss)
+        canStatusText = label("CANbus · esperando datos de la pantalla", 17f, textMuted)
+        canStatusText.gravity = Gravity.CENTER_VERTICAL
+        canStatusText.setPadding(px(10f), 0, px(10f), 0)
+        canWidgetHost.addWidget(
+            id = "vehicle_status",
+            content = canStatusText,
+            left = 30f, top = 452f, width = 480f, height = 26f
+        )
+        root.addView(canWidgetHost, FrameLayout.LayoutParams(MP, MP))
+    }
+
+    private fun startCanBusGateway() {
+        if (canBusGateway != null) return
+        canBusGateway = CanBusGateway(this) { state ->
+            runOnUiThread {
+                if (!::canStatusText.isInitialized) return@runOnUiThread
+                canStatusText.text = state.toDisplayText()
+                canStatusText.setTextColor(if (state.hasAlerts) 0xFFFFC857.toInt() else lightBlue)
+            }
+        }.also { it.start() }
+    }
+
+    private fun stopCanBusGateway() {
+        canBusGateway?.stop()
+        canBusGateway = null
+    }
+
+    private fun installMapSwipeGesture() {
+        root.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    swipeDownX = event.x
+                    swipeDownY = event.y
+                    false
+                }
+                MotionEvent.ACTION_UP -> {
+                    val dx = event.x - swipeDownX
+                    val dy = event.y - swipeDownY
+                    if (uiReady && drawer.visibility != View.VISIBLE &&
+                        blackout.visibility != View.VISIBLE &&
+                        kotlin.math.abs(dx) > px(110f) &&
+                        kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.35f) {
+                        if (dx < 0f) startSafe(Intent(this, OfflineMapActivity::class.java))
+                        true
+                    } else false
+                }
+                else -> false
+            }
+        }
+    }
+
     // ---- Modo nocturno y pantalla negra ----
 
     private fun buildOverlays() {
@@ -1009,7 +1106,9 @@ class MainActivity : Activity() {
 
     private fun launchPackage(pkg: String): Boolean {
         val i = packageManager.getLaunchIntentForPackage(pkg) ?: return false
-        return startSafe(i)
+        val launched = startSafe(i)
+        if (launched) rememberRecentPackage(pkg)
+        return launched
     }
 
     private fun openNavigation() {
@@ -1050,8 +1149,11 @@ class MainActivity : Activity() {
     private fun findPhoneBt(): ComponentName? = findApp(PHONE_BT_EXACT)
     private fun findZlink(): ComponentName? = findApp(ZLINK_EXACT, ZLINK_CONTAINS, "zlink")
 
-    private fun launchComponent(c: ComponentName): Boolean =
-        startSafe(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(c))
+    private fun launchComponent(c: ComponentName): Boolean {
+        val launched = startSafe(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(c))
+        if (launched) rememberRecentPackage(c.packageName)
+        return launched
+    }
 
     /** Música: primero "Music BT"; si no está instalada, Spotify y luego cualquier reproductor. */
     private fun openMusic() {
