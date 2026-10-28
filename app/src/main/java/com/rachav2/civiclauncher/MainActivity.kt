@@ -1031,7 +1031,10 @@ class MainActivity : Activity() {
                 val i = Intent(Intent.ACTION_MAIN)
                     .addCategory(Intent.CATEGORY_LAUNCHER)
                     .setComponent(app.component)
-                if (startSafe(i)) closeDrawer()
+                if (startSafe(i)) {
+                    rememberRecentPackage(app.component.packageName)
+                    closeDrawer()
+                }
             }
         }
         drawer.addView(drawerGrid, lp(60f, 92f, 1160f, 530f))
