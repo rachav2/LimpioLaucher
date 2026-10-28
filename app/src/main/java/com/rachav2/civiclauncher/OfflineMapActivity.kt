@@ -3,6 +3,8 @@ package com.rachav2.civiclauncher
 import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -20,6 +22,7 @@ import android.widget.TextView
 import android.widget.Toast
 import android.database.sqlite.SQLiteDatabase
 import java.io.File
+import java.io.FileOutputStream
 import kotlin.math.floor
 import kotlin.math.pow
 
@@ -32,6 +35,7 @@ import kotlin.math.pow
 class OfflineMapActivity : Activity() {
     private lateinit var map: OfflineTilesView
     private lateinit var status: TextView
+    private val pickMapRequestCode = 42
     private val manager by lazy { getSystemService(Context.LOCATION_SERVICE) as LocationManager }
     private val listener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -55,6 +59,21 @@ class OfflineMapActivity : Activity() {
             text = "Mapa offline · esperando GPS"
         }
         root.addView(status, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+        val loadMap = TextView(this).apply {
+            text = "＋  Cargar mapa MBTiles"
+            textSize = 17f
+            setTextColor(Color.WHITE)
+            setPadding(24, 18, 24, 18)
+            setBackgroundColor(0xDD15345D.toInt())
+            setOnClickListener {
+                val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                }
+                startActivityForResult(pick, pickMapRequestCode)
+            }
+        }
+        root.addView(loadMap, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START))
         val close = TextView(this).apply {
             text = "✕  Volver"
             textSize = 18f
@@ -81,6 +100,21 @@ class OfflineMapActivity : Activity() {
         }
     }
 
+    @Deprecated("Deprecated in Android API; retained for compatibility with the head unit")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != pickMapRequestCode || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        if (map.installMapFrom(uri)) {
+            val loc = map.location
+            status.text = if (loc == null) "Mapa offline cargado · esperando GPS" else
+                String.format(java.util.Locale.US, "Mapa offline cargado · GPS %.5f, %.5f", loc.latitude, loc.longitude)
+            Toast.makeText(this, "Mapa instalado correctamente", Toast.LENGTH_LONG).show()
+        } else {
+            Toast.makeText(this, "Archivo no compatible. Necesitas MBTiles ráster PNG/JPG con teselas al zoom 13.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         try { manager.removeUpdates(listener) } catch (_: Exception) { }
@@ -100,6 +134,29 @@ private class OfflineTilesView(context: Context) : View(context) {
     init { setBackgroundColor(0xFF0B1726.toInt()) }
 
     fun hasOfflineDatabase(): Boolean = mapFile.isFile
+
+    fun installMapFrom(uri: Uri): Boolean {
+        val parent = mapFile.parentFile ?: return false
+        if (!parent.exists() && !parent.mkdirs()) return false
+        val temp = File(parent, "el_salvador.pending.mbtiles")
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(temp).use { output -> input.copyTo(output) }
+            } ?: return false
+            val valid = SQLiteDatabase.openDatabase(temp.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { database ->
+                database.rawQuery("SELECT tile_data FROM tiles WHERE zoom_level=13 LIMIT 1", null).use { cursor ->
+                    cursor.moveToFirst() && BitmapFactory.decodeByteArray(cursor.getBlob(0), 0, cursor.getBlob(0).size) != null
+                }
+            }
+            if (!valid) { temp.delete(); return false }
+            close()
+            if (mapFile.exists() && !mapFile.delete()) { temp.delete(); return false }
+            temp.renameTo(mapFile).also { if (!it) temp.delete() }
+        } catch (_: Exception) {
+            temp.delete()
+            false
+        }
+    }
 
     fun close() {
         try { db?.close() } catch (_: Exception) { }
