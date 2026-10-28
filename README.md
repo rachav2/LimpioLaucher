@@ -10,8 +10,7 @@ Launcher Android para pantallas de auto, con tema azul oscuro inspirado en el Ho
 - Reproductor con carátula, título, artista, progreso y controles. Prioriza Music BT y usa otras sesiones multimedia activas si hace falta. El acceso a notificaciones debe habilitarse para leer la sesión.
 - Dock dinámico con hasta cuatro aplicaciones iniciadas desde el launcher y un acceso fijo al cajón de aplicaciones. Android no informa de forma fiable qué aplicaciones abrió otro launcher sin conceder acceso de uso.
 - Paneles movibles y ocultables. Mantén pulsada una tarjeta para editarla; las posiciones se guardan entre reinicios.
-- Pantalla de navegación con mapa web de Google Maps o Waze. El mapa web no requiere clave de Maps SDK. El botón para abrir la app transfiere el destino cuando la aplicación correspondiente está instalada.
-- Barra inferior para apagar la pantalla, abrir el asistente, ajustes, teléfono Bluetooth, navegación y modo nocturno.
+- Barra inferior para apagar la pantalla, abrir el asistente, ajustes, teléfono Bluetooth y modo nocturno.
 
 El launcher no incluye lectura OBD2; no muestra consumo ni temperatura del motor.
 
@@ -40,10 +39,9 @@ Android requiere acceso especial para leer la canción que suena:
 
 ## Organización del código
 
-- `MainActivity.kt`: pantalla principal, ciclo de vida, controles y navegación entre paneles.
+- `MainActivity.kt`: pantalla principal, ciclo de vida, controles y gestión de paneles.
 - `TripInfoRepository.kt`: consultas de geocodificación y clima fuera del hilo de interfaz, con espera progresiva entre reintentos.
 - `InstalledAppsCatalog.kt`: detección de aplicaciones instaladas y selección de Music BT, BT y ZLINK.
-- `GoogleMapActivity.kt`: pantalla de navegación web.
 - `SpeedRingView.kt`: dibujo del anillo del velocímetro.
 
 ## Personalizar

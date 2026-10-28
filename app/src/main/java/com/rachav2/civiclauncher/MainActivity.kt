@@ -23,7 +23,6 @@ import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -127,8 +126,6 @@ class MainActivity : Activity() {
     // ---- Estado ----
     private var nightMode = false
     private var lastDate = ""
-    private var swipeDownX = 0f
-    private var swipeDownY = 0f
 
     private val panelRegions = listOf(
         PanelRegion("vehicle", 20f, 20f, 500f, 440f),
@@ -790,7 +787,6 @@ class MainActivity : Activity() {
             barButton(R.drawable.ic_mic, tint) { openAssistant() },
             barButton(R.drawable.ic_settings, tint) { openSettings() },
             barButton(R.drawable.ic_phone, tint) { openPhone() },
-            barButton(R.drawable.ic_pin, tint) { openNavigation() },
             nightBtn
         )
         for (b in buttons) bar.addView(b, LinearLayout.LayoutParams(0, MP, 1f))
@@ -920,8 +916,6 @@ class MainActivity : Activity() {
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                swipeDownX = event.rawX
-                swipeDownY = event.rawY
                 panelLongPressTask?.let { handler.removeCallbacks(it) }
                 panelDragging = false
                 panelDragViews = emptyList()
@@ -993,15 +987,6 @@ class MainActivity : Activity() {
                     return true
                 }
                 pendingPanelId = null
-                val dx = event.rawX - swipeDownX
-                val dy = event.rawY - swipeDownY
-                if (uiReady && drawer.visibility != View.VISIBLE &&
-                    blackout.visibility != View.VISIBLE &&
-                    kotlin.math.abs(dx) > px(110f) &&
-                    kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.35f && dx < 0f) {
-                    if (!openMapScreen()) toast("No se pudo abrir la pantalla de navegación")
-                    return true
-                }
             }
             MotionEvent.ACTION_CANCEL -> {
                 panelLongPressTask?.let { handler.removeCallbacks(it) }
@@ -1160,22 +1145,6 @@ class MainActivity : Activity() {
         val launched = startSafe(i)
         if (launched) rememberRecentPackage(pkg)
         return launched
-    }
-
-    private fun openNavigation() {
-        if (openMapScreen()) return
-        if (launchPackage("com.google.android.apps.maps")) return
-        if (startSafe(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0")))) return
-        openDrawer()
-        toast("No encontré una app de mapas. Elige una de la lista.")
-    }
-
-    /** Opens the in-app screen in the current task; external apps use startSafe(). */
-    private fun openMapScreen(): Boolean = try {
-        startActivity(Intent(this, GoogleMapActivity::class.java))
-        true
-    } catch (_: Exception) {
-        false
     }
 
     private fun findMusicBt(): ComponentName? = appCatalog.find(InstalledAppsCatalog.MUSIC_BT_EXACT, InstalledAppsCatalog.MUSIC_BT_CONTAINS)
