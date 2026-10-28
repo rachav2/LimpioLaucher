@@ -97,7 +97,6 @@ class MainActivity : Activity() {
     private lateinit var speedText: TextView
     private lateinit var dateText: TextView
     private lateinit var locationText: TextView
-    private lateinit var weatherText: TextView
     private lateinit var artView: ImageView
     private lateinit var titleText: TextView
     private lateinit var artistText: TextView
@@ -113,6 +112,12 @@ class MainActivity : Activity() {
     private lateinit var drawer: FrameLayout
     private lateinit var drawerGrid: GridView
     private lateinit var recentDock: LinearLayout
+    private lateinit var editOverlay: FrameLayout
+    private lateinit var tabsBar: LinearLayout
+    private lateinit var bottomBar: LinearLayout
+    private var selectedTab = "HOME"
+    private val tabs = mutableListOf("HOME", "VIAJE", "MULTIMEDIA", "AJUSTES COCHE")
+    private val homeViews = mutableListOf<View>()
     private var pendingPanelId: String? = null
     private var panelDragging = false
     private var panelDownX = 0f
@@ -128,12 +133,13 @@ class MainActivity : Activity() {
     private var lastDate = ""
 
     private val panelRegions = listOf(
-        PanelRegion("vehicle", 20f, 20f, 500f, 440f),
-        PanelRegion("clock", 540f, 20f, 340f, 170f),
-        PanelRegion("trip", 540f, 210f, 340f, 250f),
-        PanelRegion("dock", 20f, 480f, 860f, 140f),
-        PanelRegion("media", 900f, 20f, 360f, 600f),
-        PanelRegion("bottom", 20f, 636f, 1240f, 68f)
+        PanelRegion("vehicle", 20f, 70f, 360f, 340f),
+        PanelRegion("clock", 400f, 70f, 250f, 120f),
+        PanelRegion("weather", 400f, 205f, 250f, 205f),
+        PanelRegion("trip", 670f, 70f, 260f, 340f),
+        PanelRegion("dock", 20f, 430f, 910f, 130f),
+        PanelRegion("media", 950f, 70f, 310f, 490f),
+        PanelRegion("bottom", 20f, 590f, 1240f, 68f)
     )
 
     // ---- Ubicación y clima ----
@@ -402,14 +408,23 @@ class MainActivity : Activity() {
         ss = min(sx, sy)
 
         buildVehicleCard()
+        buildTabs()
         buildClockCard()
         buildTripCard()
+        buildWeatherCard()
         buildDockCard()
         buildMediaCard()
         buildDrawer()
         buildBottomBar()
         configureMovablePanels()
         buildOverlays()
+        buildEditOverlay()
+        homeViews.clear()
+        for (i in 0 until root.childCount) {
+            val view = root.getChildAt(i)
+            if (view !== tabsBar && view !== bottomBar && view !== drawer && view !== editOverlay &&
+                view !== nightOverlay && view !== blackout) homeViews.add(view)
+        }
 
         uiReady = true
         showIdle()
@@ -428,7 +443,7 @@ class MainActivity : Activity() {
     // ---- Tarjeta del vehículo (velocímetro) ----
 
     private fun buildVehicleCard() {
-        card(20f, 20f, 500f, 440f)
+        card(20f, 70f, 360f, 340f)
 
         val title = LinearLayout(this)
         title.orientation = LinearLayout.HORIZONTAL
@@ -438,31 +453,89 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(px(36f), px(36f)).apply { rightMargin = px(12f) }
         )
         title.addView(label("Civic 2012", 30f, lightBlue, true))
-        root.addView(title, lp(44f, 36f, 260f, 44f))
+        root.addView(title, lp(40f, 82f, 260f, 40f))
 
         // El velocímetro queda arriba y el carro debajo, sin que se toquen
         // (anillo: y 84..284; carro: y 294..450).
-        ring = SpeedRingView(this, 12f * ss)
-        root.addView(ring, lp(170f, 84f, 200f, 200f))
+        ring = SpeedRingView(this, 10f * ss)
+        root.addView(ring, lp(100f, 126f, 180f, 180f))
 
         speedText = label("0", 80f, Color.WHITE, true)
         speedText.gravity = Gravity.CENTER
-        root.addView(speedText, lp(170f, 128f, 200f, 86f))
+        root.addView(speedText, lp(100f, 164f, 180f, 76f))
 
         val unit = label("km/h", 26f, textMuted)
         unit.gravity = Gravity.CENTER
-        root.addView(unit, lp(170f, 214f, 200f, 30f))
+        root.addView(unit, lp(100f, 236f, 180f, 28f))
 
         val car = ImageView(this)
         car.setImageResource(R.drawable.car)
         car.scaleType = ImageView.ScaleType.FIT_CENTER
-        root.addView(car, lp(70f, 294f, 400f, 156f))
+        root.addView(car, lp(55f, 292f, 290f, 106f))
+    }
+
+    private fun buildTabs() {
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            background = panelBg(18f)
+        }
+        tabsBar = bar
+        for (tab in tabs) {
+            val button = TextView(this).apply {
+                text = tab
+                gravity = Gravity.CENTER
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, 22f * ss)
+                setTextColor(if (tab == selectedTab) Color.WHITE else textMuted)
+                typeface = Typeface.DEFAULT_BOLD
+                isClickable = true
+                setOnClickListener { selectTab(tab) }
+                if (tab == selectedTab) background = rounded(0x553D5F9D, 14f, lightBlue)
+            }
+            bar.addView(button, LinearLayout.LayoutParams(0, MP, 1f))
+        }
+        val add = TextView(this).apply {
+            text = "+"
+            gravity = Gravity.CENTER
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, 38f * ss)
+            setTextColor(lightBlue)
+            setOnClickListener { editOverlay.visibility = View.VISIBLE }
+        }
+        bar.addView(add, LinearLayout.LayoutParams(px(76f), MP))
+        root.addView(bar, lp(20f, 10f, 1240f, 50f))
+    }
+
+    private fun selectTab(tab: String) {
+        selectedTab = tab
+        when (tab) {
+            "HOME" -> {
+                editOverlay.visibility = View.GONE
+                homeViews.forEach { it.visibility = View.VISIBLE }
+            }
+            else -> {
+                homeViews.forEach { it.visibility = View.GONE }
+                editOverlay.visibility = View.VISIBLE
+                showTabContent(tab)
+            }
+        }
+        val index = root.indexOfChild(tabsBar)
+        root.removeView(tabsBar)
+        buildTabs()
+        root.removeView(tabsBar)
+        root.addView(tabsBar, index, lp(20f, 10f, 1240f, 50f))
+    }
+
+    private fun showTabContent(tab: String) {
+        editOverlay.removeAllViews()
+        val title = label(tab, 34f, Color.WHITE, true).apply { gravity = Gravity.CENTER }
+        editOverlay.addView(title, FrameLayout.LayoutParams(MP, MP))
+        editOverlay.visibility = View.VISIBLE
     }
 
     // ---- Reloj ----
 
     private fun buildClockCard() {
-        card(540f, 20f, 340f, 170f)
+        card(400f, 70f, 250f, 120f)
 
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
@@ -471,7 +544,7 @@ class MainActivity : Activity() {
         val time = TextClock(this)
         time.format12Hour = "h:mm"
         time.format24Hour = "HH:mm"
-        styleClock(time, 88f, Color.WHITE, true)
+        styleClock(time, 64f, Color.WHITE, true)
         row.addView(time)
 
         val ampm = TextClock(this)
@@ -485,10 +558,10 @@ class MainActivity : Activity() {
                 bottomMargin = px(12f)
             }
         )
-        root.addView(row, lp(564f, 30f, 300f, 100f))
+        root.addView(row, lp(418f, 82f, 220f, 72f))
 
         dateText = label("", 26f, textMuted)
-        root.addView(dateText, lp(564f, 134f, 300f, 34f))
+        root.addView(dateText, lp(418f, 158f, 220f, 24f))
     }
 
     private fun updateDate() {
@@ -512,7 +585,7 @@ class MainActivity : Activity() {
     }
 
     private fun buildTripCard() {
-        card(540f, 210f, 340f, 250f)
+        card(670f, 70f, 260f, 340f)
 
         val head = LinearLayout(this)
         head.orientation = LinearLayout.HORIZONTAL
@@ -522,27 +595,33 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(px(30f), px(30f)).apply { rightMargin = px(12f) }
         )
         head.addView(label("Viaje", 28f, Color.WHITE, true))
-        root.addView(head, lp(564f, 228f, 290f, 38f))
+        root.addView(head, lp(688f, 82f, 220f, 38f))
 
-        locationText = label("", 26f, Color.WHITE, true)
-        weatherText = label("", 26f, Color.WHITE, true)
+        locationText = label("", 23f, Color.WHITE, true)
+        root.addView(label("UBICACIÓN ACTUAL", 16f, textMuted, true), lp(688f, 132f, 220f, 24f))
+        root.addView(locationText, lp(688f, 158f, 220f, 50f))
+        val map = View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xFF22354D.toInt(), 0xFF142338.toInt(), 0xFF263B4A.toInt())).apply {
+                cornerRadius = px(16f).toFloat()
+            }
+        }
+        root.addView(map, lp(688f, 220f, 224f, 166f))
+        val pin = iconView(R.drawable.ic_nav, 40f, null, 4f, lightBlue)
+        root.addView(pin, lp(780f, 274f, 40f, 40f))
+    }
 
-        val rows = LinearLayout(this)
-        rows.orientation = LinearLayout.VERTICAL
-        rows.addView(
-            infoBlock("Ubicación actual", locationText),
-            LinearLayout.LayoutParams(MP, px(84f))
-        )
-        rows.addView(
-            infoBlock("Clima actual", weatherText),
-            LinearLayout.LayoutParams(MP, px(84f))
-        )
-        root.addView(rows, lp(564f, 280f, 292f, 170f))
+    private fun buildWeatherCard() {
+        card(400f, 205f, 250f, 205f)
+        root.addView(label("CLIMA", 20f, textMuted, true), lp(418f, 218f, 200f, 28f))
+        val weatherIcon = label("⛅", 55f, Color.WHITE, true).apply { gravity = Gravity.CENTER }
+        root.addView(weatherIcon, lp(414f, 255f, 82f, 78f))
+        root.addView(label("26°C", 46f, Color.WHITE, true), lp(505f, 266f, 125f, 52f))
+        root.addView(label("Parcialmente nublado", 18f, textMuted), lp(418f, 344f, 215f, 30f))
     }
 
     private fun updateTripViews() {
         locationText.text = placeName ?: "Buscando ubicación…"
-        weatherText.text = weatherLabel ?: "Obteniendo clima…"
     }
 
     /** Muestra enseguida la última posición conocida, sin esperar al primer fix del GPS. */
@@ -593,7 +672,7 @@ class MainActivity : Activity() {
         val appsIcon = iconView(R.drawable.ic_apps, 76f, 0xFF2A3F66.toInt(), 18f)
         dock.addView(dockCell("Todas las apps", appsIcon) { toggleDrawer() },
             LinearLayout.LayoutParams(px(170f), MP))
-        root.addView(dock, lp(20f, 480f, 860f, 140f))
+        root.addView(dock, lp(20f, 430f, 910f, 130f))
         refreshRecentDock()
     }
 
@@ -691,21 +770,21 @@ class MainActivity : Activity() {
 
         artView = ImageView(this)
         roundClip(artView, 0.16f)
-        card.addView(artView, LinearLayout.LayoutParams(px(ART_SIZE), px(ART_SIZE)))
+        card.addView(artView, LinearLayout.LayoutParams(px(200f), px(200f)))
 
-        titleText = label("", 30f, Color.WHITE, true)
+        titleText = label("", 25f, Color.WHITE, true)
         titleText.gravity = Gravity.CENTER
-        card.addView(titleText, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(22f) })
+        card.addView(titleText, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(12f) })
 
         artistText = label("", 22f, textMuted)
         artistText.gravity = Gravity.CENTER
-        card.addView(artistText, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(8f) })
+        card.addView(artistText, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(4f) })
 
         progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
         progressBar.max = 1000
         progressBar.progressTintList = ColorStateList.valueOf(blue)
         progressBar.progressBackgroundTintList = ColorStateList.valueOf(strokeColor)
-        card.addView(progressBar, LinearLayout.LayoutParams(MP, px(8f)).apply { topMargin = px(24f) })
+        card.addView(progressBar, LinearLayout.LayoutParams(MP, px(8f)).apply { topMargin = px(12f) })
 
         val controls = LinearLayout(this)
         controls.orientation = LinearLayout.HORIZONTAL
@@ -747,10 +826,19 @@ class MainActivity : Activity() {
         }
         controls.addView(next, LinearLayout.LayoutParams(px(56f), px(56f)))
 
-        card.addView(controls, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(26f) })
+        card.addView(controls, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(12f) })
 
         // Ocupa toda la columna derecha (antes compartía el espacio con Mantenimiento)
-        root.addView(card, lp(900f, 20f, 360f, 600f))
+        root.addView(card, lp(950f, 70f, 310f, 490f))
+        val edit = TextView(this).apply {
+            text = "✎"
+            gravity = Gravity.CENTER
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, 28f * ss)
+            setTextColor(Color.WHITE)
+            background = rounded(0xAA45536B.toInt(), 30f)
+            setOnClickListener { editOverlay.visibility = View.VISIBLE }
+        }
+        root.addView(edit, lp(1212f, 78f, 40f, 40f))
     }
 
     /** Respaldo para apps de música Bluetooth que no publican una sesión de medios. */
@@ -780,6 +868,7 @@ class MainActivity : Activity() {
         bar.background = panelBg(30f)
 
         val tint = lightBlue
+        bottomBar = bar
         nightBtn = barButton(R.drawable.ic_moon, tint) { toggleNight() }
 
         val buttons = listOf(
@@ -790,7 +879,68 @@ class MainActivity : Activity() {
             nightBtn
         )
         for (b in buttons) bar.addView(b, LinearLayout.LayoutParams(0, MP, 1f))
-        root.addView(bar, lp(20f, 636f, 1240f, 68f))
+        root.addView(bar, lp(20f, 590f, 1240f, 68f))
+    }
+
+    private fun buildEditOverlay() {
+        editOverlay = FrameLayout(this).apply {
+            setBackgroundColor(0xAA02060E.toInt())
+            visibility = View.GONE
+            isClickable = true
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = panelBg(22f)
+            setPadding(px(16f), px(12f), px(16f), px(12f))
+        }
+        val folders = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        listOf("GESTIONAR CARPETAS Y WIDGETS", "📁  VIAJE", "♫  MULTIMEDIA", "⚙  AJUSTES COCHE", "+  NUEVA PESTAÑA / WIDGET").forEachIndexed { index, text ->
+            val item = TextView(this).apply {
+                this.text = text
+                gravity = Gravity.CENTER_VERTICAL
+                setTextColor(if (index == 1) lightBlue else Color.WHITE)
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, if (index == 0) 17f * ss else 20f * ss)
+                setPadding(px(12f), 0, px(8f), 0)
+                setOnClickListener { if (index == 4) addTabDialog() }
+            }
+            folders.addView(item, LinearLayout.LayoutParams(MP, 0, if (index == 0) 0.8f else 1f))
+        }
+        panel.addView(folders, LinearLayout.LayoutParams(0, MP, 0.38f))
+        val options = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        options.addView(label(selectedTab, 25f, Color.WHITE, true), LinearLayout.LayoutParams(MP, px(42f)))
+        listOf("Ubicación actual y mapa", "Registro de viaje", "Zoom automático", "Tráfico", "Favoritos", "Duración", "Distancia", "Consumo", "Restricciones de velocidad").forEach { name ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(label(name, 17f, Color.WHITE), LinearLayout.LayoutParams(0, MP, 1f))
+                val toggle = android.widget.Switch(this@MainActivity).apply {
+                    isChecked = name == "Ubicación actual y mapa" || name == "Duración" || name == "Distancia"
+                }
+                addView(toggle)
+            }
+            options.addView(row, LinearLayout.LayoutParams(MP, 0, 1f))
+        }
+        panel.addView(options, LinearLayout.LayoutParams(0, MP, 0.62f))
+        editOverlay.addView(panel, lp(40f, 80f, 820f, 480f))
+        val close = TextView(this).apply {
+            text = "LISTO   ×"
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setOnClickListener { editOverlay.visibility = View.GONE }
+        }
+        editOverlay.addView(close, lp(760f, 575f, 100f, 42f))
+        root.addView(editOverlay, FrameLayout.LayoutParams(MP, MP))
+    }
+
+    private fun addTabDialog() {
+        val input = android.widget.EditText(this).apply { hint = "Nombre de pestaña" }
+        android.app.AlertDialog.Builder(this).setTitle("Nueva pestaña / widget").setView(input)
+            .setPositiveButton("Añadir") { _, _ ->
+                val name = input.text.toString().trim().uppercase(Locale.getDefault())
+                if (name.isNotEmpty() && name !in tabs) tabs.add(tabs.lastIndex, name)
+                uiReady = false
+                buildUi()
+            }.setNegativeButton("Cancelar", null).show()
     }
 
 
