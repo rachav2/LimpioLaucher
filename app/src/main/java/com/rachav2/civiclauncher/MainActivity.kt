@@ -931,28 +931,29 @@ class MainActivity : Activity() {
         canBusGateway = null
     }
 
-    private fun installMapSwipeGesture() {
-        root.setOnTouchListener { _, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    swipeDownX = event.x
-                    swipeDownY = event.y
-                    false
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            swipeDownX = event.rawX
+            swipeDownY = event.rawY
+        } else if (event.actionMasked == MotionEvent.ACTION_UP) {
+            val dx = event.rawX - swipeDownX
+            val dy = event.rawY - swipeDownY
+            if (uiReady && drawer.visibility != View.VISIBLE &&
+                blackout.visibility != View.VISIBLE &&
+                kotlin.math.abs(dx) > px(110f) &&
+                kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.35f) {
+                if (dx < 0f) {
+                    startSafe(Intent(this, OfflineMapActivity::class.java))
+                    return true
                 }
-                MotionEvent.ACTION_UP -> {
-                    val dx = event.x - swipeDownX
-                    val dy = event.y - swipeDownY
-                    if (uiReady && drawer.visibility != View.VISIBLE &&
-                        blackout.visibility != View.VISIBLE &&
-                        kotlin.math.abs(dx) > px(110f) &&
-                        kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.35f) {
-                        if (dx < 0f) startSafe(Intent(this, OfflineMapActivity::class.java))
-                        true
-                    } else false
-                }
-                else -> false
             }
         }
+        return super.dispatchTouchEvent(event)
+    }
+
+    private fun installMapSwipeGesture() {
+        // El gesto se detecta en dispatchTouchEvent para que funcione incluso sobre widgets.
+        root.setOnTouchListener(null)
     }
 
     // ---- Modo nocturno y pantalla negra ----
