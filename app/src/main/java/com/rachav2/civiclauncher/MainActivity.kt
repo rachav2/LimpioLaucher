@@ -1025,7 +1025,7 @@ class MainActivity : Activity() {
                     blackout.visibility != View.VISIBLE &&
                     kotlin.math.abs(dx) > px(110f) &&
                     kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.35f && dx < 0f) {
-                    startSafe(Intent(this, OfflineMapActivity::class.java))
+                    startSafe(Intent(this, GoogleMapActivity::class.java))
                     return true
                 }
             }
@@ -1202,6 +1202,7 @@ class MainActivity : Activity() {
     }
 
     private fun openNavigation() {
+        if (startSafe(Intent(this, GoogleMapActivity::class.java))) return
         if (launchPackage("com.google.android.apps.maps")) return
         if (startSafe(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0")))) return
         openDrawer()
