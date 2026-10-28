@@ -90,6 +90,7 @@ class MainActivity : Activity() {
 
     private lateinit var root: FrameLayout
     private lateinit var prefs: SharedPreferences
+    private lateinit var tripInfoRepository: TripInfoRepository
     private val handler = Handler(Looper.getMainLooper())
 
     // ---- Vistas ----
@@ -141,12 +142,6 @@ class MainActivity : Activity() {
     // ---- Ubicación y clima ----
     private var placeName: String? = null
     private var weatherLabel: String? = null
-    private var geoLoc: Location? = null
-    private var geoTime = 0L
-    private var weatherLoc: Location? = null
-    private var weatherTime = 0L
-    private var geoBusy = false
-    private var weatherBusy = false
 
     // ---- Medios ----
     private var sessionManager: MediaSessionManager? = null
@@ -192,14 +187,13 @@ class MainActivity : Activity() {
             val shown = if (kmh < 2f) 0 else kmh.roundToInt()
             speedText.text = shown.toString()
             ring.setSpeed(shown)
-            refreshPlaceAndWeather(location)
+            tripInfoRepository.refresh(location)
         }
     }
 
     // ---- Apps instaladas ----
-    private class AppEntry(val label: String, val component: ComponentName, val icon: Drawable)
-
-    private var apps: List<AppEntry> = emptyList()
+    private val appCatalog by lazy { InstalledAppsCatalog(this) }
+    private var apps: List<InstalledApp> = emptyList()
 
     // =====================================================================
     // Ciclo de vida
@@ -211,6 +205,19 @@ class MainActivity : Activity() {
         nightMode = prefs.getBoolean("night", false)
         placeName = prefs.getString("place", null)
         weatherLabel = prefs.getString("weather", null)
+        tripInfoRepository = TripInfoRepository(
+            context = this,
+            onPlaceUpdated = { value ->
+                placeName = value
+                prefs.edit().putString("place", value).apply()
+                if (uiReady) updateTripViews()
+            },
+            onWeatherUpdated = { value ->
+                weatherLabel = value
+                prefs.edit().putString("weather", value).apply()
+                if (uiReady) updateTripViews()
+            }
+        )
 
         root = FrameLayout(this)
         root.background = GradientDrawable(
@@ -257,6 +264,11 @@ class MainActivity : Activity() {
         }
         controller?.unregisterCallback(controllerCallback)
         controller = null
+    }
+
+    override fun onDestroy() {
+        if (::tripInfoRepository.isInitialized) tripInfoRepository.close()
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -483,7 +495,7 @@ class MainActivity : Activity() {
     }
 
     private fun updateDate() {
-        val s = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("es")).format(Date())
+        val s = SimpleDateFormat("EEEE, d 'de' MMMM", Locale.forLanguageTag("es")).format(Date())
             .replaceFirstChar { it.uppercase() }
         if (s != lastDate) {
             lastDate = s
@@ -549,137 +561,10 @@ class MainActivity : Activity() {
                     }
                 }
                 .maxByOrNull { it.time }
-            if (last != null) refreshPlaceAndWeather(last)
+            if (last != null) tripInfoRepository.refresh(last)
         } catch (e: Exception) {
             // sin posición conocida
         }
-    }
-
-    private fun refreshPlaceAndWeather(loc: Location) {
-        val now = SystemClock.elapsedRealtime()
-
-        val g = geoLoc
-        if (!geoBusy && (g == null || loc.distanceTo(g) > 500f || now - geoTime > 15 * 60_000L)) {
-            geoBusy = true
-            geoLoc = loc
-            geoTime = now
-            Thread {
-                val name = reverseGeocode(loc.latitude, loc.longitude)
-                handler.post {
-                    geoBusy = false
-                    if (name != null) {
-                        placeName = name
-                        prefs.edit().putString("place", name).apply()
-                    } else {
-                        geoTime = 0L // reintenta en la siguiente lectura
-                    }
-                    if (uiReady) updateTripViews()
-                }
-            }.start()
-        }
-
-        val w = weatherLoc
-        if (!weatherBusy && (w == null || loc.distanceTo(w) > 3000f || now - weatherTime > 15 * 60_000L)) {
-            weatherBusy = true
-            weatherLoc = loc
-            weatherTime = now
-            Thread {
-                val text = fetchWeather(loc.latitude, loc.longitude)
-                handler.post {
-                    weatherBusy = false
-                    if (text != null) {
-                        weatherLabel = text
-                        prefs.edit().putString("weather", text).apply()
-                    } else {
-                        weatherTime = 0L
-                    }
-                    if (uiReady) updateTripViews()
-                }
-            }.start()
-        }
-    }
-
-    private fun httpGet(url: String): String? = try {
-        val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-        c.connectTimeout = 8000
-        c.readTimeout = 8000
-        c.setRequestProperty("User-Agent", "CivicLauncher/1.0 (Android)")
-        c.setRequestProperty("Accept-Language", "es")
-        try {
-            if (c.responseCode == 200) c.inputStream.bufferedReader().use { it.readText() } else null
-        } finally {
-            c.disconnect()
-        }
-    } catch (e: Exception) {
-        null
-    }
-
-    /** Nombre del lugar (colonia/ciudad y departamento). Corre en un hilo aparte. */
-    @Suppress("DEPRECATION")
-    private fun reverseGeocode(lat: Double, lon: Double): String? {
-        try {
-            if (android.location.Geocoder.isPresent()) {
-                val list = android.location.Geocoder(this, Locale("es")).getFromLocation(lat, lon, 1)
-                val a = list?.firstOrNull()
-                if (a != null) {
-                    val city = a.locality ?: a.subLocality ?: a.subAdminArea
-                    val state = a.adminArea
-                    val s = listOfNotNull(city, state).distinct().joinToString(", ")
-                    if (s.isNotEmpty()) return s
-                }
-            }
-        } catch (e: Exception) {
-            // se prueba con el servicio web
-        }
-        val body = httpGet(
-            String.format(
-                Locale.US,
-                "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=14&addressdetails=1&accept-language=es&lat=%.5f&lon=%.5f",
-                lat, lon
-            )
-        ) ?: return null
-        return try {
-            val a = org.json.JSONObject(body).getJSONObject("address")
-            val keys = listOf("suburb", "neighbourhood", "city_district", "city", "town", "village", "municipality", "county")
-            val place = keys.firstNotNullOfOrNull { k -> a.optString(k).takeIf { it.isNotEmpty() } }
-            val state = a.optString("state").takeIf { it.isNotEmpty() }
-            listOfNotNull(place, state).distinct().joinToString(", ").ifEmpty { null }
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    /** Clima actual desde Open-Meteo (gratis, sin clave). Corre en un hilo aparte. */
-    private fun fetchWeather(lat: Double, lon: Double): String? {
-        val body = httpGet(
-            String.format(
-                Locale.US,
-                "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code&timezone=auto",
-                lat, lon
-            )
-        ) ?: return null
-        return try {
-            val cur = org.json.JSONObject(body).getJSONObject("current")
-            val t = cur.getDouble("temperature_2m").roundToInt()
-            "$t°C · ${weatherDescription(cur.getInt("weather_code"))}"
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    private fun weatherDescription(code: Int): String = when (code) {
-        0 -> "Despejado"
-        1 -> "Mayormente despejado"
-        2 -> "Parcialmente nublado"
-        3 -> "Nublado"
-        45, 48 -> "Niebla"
-        51, 53, 55, 56, 57 -> "Llovizna"
-        61, 63, 65, 66, 67 -> "Lluvia"
-        71, 73, 75, 77 -> "Nieve"
-        80, 81, 82 -> "Chubascos"
-        85, 86 -> "Nevadas"
-        95, 96, 99 -> "Tormenta"
-        else -> "Variable"
     }
 
     // ---- Dock de apps ----
@@ -720,7 +605,7 @@ class MainActivity : Activity() {
         if (!::recentDock.isInitialized) return
         recentDock.removeAllViews()
         val saved = prefs.getString("recent_packages", "")!!.split("|").filter { it.isNotBlank() }
-        val launcherApps = loadApps().associateBy { it.component.packageName }
+        val launcherApps = appCatalog.loadLauncherApps().associateBy { it.component.packageName }
         val recent = saved.distinct().mapNotNull { launcherApps[it] }.take(4)
         val fallback = listOf("com.spotify.music", "com.google.android.youtube")
             .filter { pkg -> launcherApps.containsKey(pkg) && recent.none { it.component.packageName == pkg } }
@@ -957,7 +842,7 @@ class MainActivity : Activity() {
     }
 
     private fun showPanelEditor(id: String) {
-        val region = panelRegions.firstOrNull { it.id == id } ?: return
+        if (panelRegions.none { it.id == id }) return
         val title = when (id) {
             "vehicle" -> "Vehículo y velocímetro"
             "clock" -> "Reloj y fecha"
@@ -1217,20 +1102,7 @@ class MainActivity : Activity() {
         root.addView(drawer, FrameLayout.LayoutParams(MP, MP))
     }
 
-    private fun loadApps(): List<AppEntry> {
-        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        return packageManager.queryIntentActivities(intent, 0)
-            .map {
-                AppEntry(
-                    it.loadLabel(packageManager).toString(),
-                    ComponentName(it.activityInfo.packageName, it.activityInfo.name),
-                    it.loadIcon(packageManager)
-                )
-            }
-            .sortedBy { it.label.lowercase() }
-    }
-
-    private inner class AppAdapter(private val list: List<AppEntry>) : BaseAdapter() {
+    private inner class AppAdapter(private val list: List<InstalledApp>) : BaseAdapter() {
         override fun getCount(): Int = list.size
         override fun getItem(position: Int): Any = list[position]
         override fun getItemId(position: Int): Long = position.toLong()
@@ -1258,7 +1130,7 @@ class MainActivity : Activity() {
     }
 
     private fun openDrawer() {
-        apps = loadApps()
+        apps = appCatalog.loadLauncherApps()
         drawerGrid.adapter = AppAdapter(apps)
         drawer.visibility = View.VISIBLE
     }
@@ -1298,36 +1170,9 @@ class MainActivity : Activity() {
         toast("No encontré una app de mapas. Elige una de la lista.")
     }
 
-    /** Busca una app instalada por el nombre con el que aparece en el cajón de aplicaciones. */
-    private fun findApp(exact: List<String>, contains: List<String> = emptyList(), pkgContains: String? = null): ComponentName? {
-        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val list = try {
-            packageManager.queryIntentActivities(intent, 0)
-        } catch (e: Exception) {
-            return null
-        }
-        val entries = list.map {
-            Triple(
-                it.loadLabel(packageManager).toString().trim().lowercase(),
-                ComponentName(it.activityInfo.packageName, it.activityInfo.name),
-                it.activityInfo.packageName.lowercase()
-            )
-        }
-        for (name in exact) {
-            entries.firstOrNull { it.first == name }?.let { return it.second }
-        }
-        for (part in contains) {
-            entries.firstOrNull { it.first.contains(part) }?.let { return it.second }
-        }
-        if (pkgContains != null) {
-            entries.firstOrNull { it.third.contains(pkgContains) }?.let { return it.second }
-        }
-        return null
-    }
-
-    private fun findMusicBt(): ComponentName? = findApp(MUSIC_BT_EXACT, MUSIC_BT_CONTAINS)
-    private fun findPhoneBt(): ComponentName? = findApp(PHONE_BT_EXACT)
-    private fun findZlink(): ComponentName? = findApp(ZLINK_EXACT, ZLINK_CONTAINS, "zlink")
+    private fun findMusicBt(): ComponentName? = appCatalog.find(InstalledAppsCatalog.MUSIC_BT_EXACT, InstalledAppsCatalog.MUSIC_BT_CONTAINS)
+    private fun findPhoneBt(): ComponentName? = appCatalog.find(InstalledAppsCatalog.PHONE_BT_EXACT)
+    private fun findZlink(): ComponentName? = appCatalog.find(InstalledAppsCatalog.ZLINK_EXACT, InstalledAppsCatalog.ZLINK_CONTAINS, "zlink")
 
     private fun launchComponent(c: ComponentName): Boolean {
         val launched = startSafe(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(c))
@@ -1543,12 +1388,5 @@ class MainActivity : Activity() {
         const val ICON_ID = 7001
         const val NAME_ID = 7002
         const val ART_SIZE = 220f
-
-        // Nombres con los que aparecen las apps de la unidad en el cajón de aplicaciones.
-        val MUSIC_BT_EXACT = listOf("music bt", "musicbt", "bt music", "btmusic", "bt-music", "música bt", "musica bt", "bluetooth music")
-        val MUSIC_BT_CONTAINS = listOf("music bt", "musicbt", "bt music", "bluetooth music")
-        val PHONE_BT_EXACT = listOf("bt", "bt phone", "btphone", "bluetooth phone")
-        val ZLINK_EXACT = listOf("zlink5", "zlink 5", "zlink")
-        val ZLINK_CONTAINS = listOf("zlink")
     }
 }

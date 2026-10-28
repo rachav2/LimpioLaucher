@@ -13,10 +13,6 @@ android {
         targetSdk = 33
         versionCode = 1
         versionName = "1.0"
-        manifestPlaceholders["MAPS_API_KEY"] =
-            providers.gradleProperty("MAPS_API_KEY")
-                .orElse(providers.environmentVariable("MAPS_API_KEY"))
-                .getOrElse("")
     }
 
     buildTypes {
@@ -35,9 +31,4 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-}
-
-
-dependencies {
-    implementation("com.google.android.gms:play-services-maps:19.2.0")
 }
