@@ -23,6 +23,7 @@ class DashboardWidgetHost(
     private val designScale: Float
 ) : FrameLayout(context) {
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private val density get() = resources.displayMetrics.density
     private var activeWidget: FrameLayout? = null
     private var downX = 0f
     private var downY = 0f
