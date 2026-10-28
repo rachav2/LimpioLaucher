@@ -565,14 +565,6 @@ class MainActivity : Activity() {
             else -> buildGenericPage(panel, tab)
         }
         editOverlay.addView(panel, lp(300f, 80f, 680f, 475f))
-        val done = TextView(this).apply {
-            text = "LISTO"
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            background = rounded(0xFF304E81.toInt(), 24f)
-            setOnClickListener { editOverlay.visibility = View.GONE }
-        }
-        editOverlay.addView(done, lp(560f, 575f, 160f, 48f))
         editOverlay.visibility = View.VISIBLE
     }
 
@@ -630,9 +622,21 @@ class MainActivity : Activity() {
         panel.addView(mediaPageArtist, LinearLayout.LayoutParams(MP, px(30f)))
         mediaPageTitle.text = titleText.text
         mediaPageArtist.text = artistText.text
-        multimediaButton(panel, "REPRODUCTOR BT  ·  PLAY / PAUSA", ::openMusic)
+        multimediaButton(panel, "ABRIR REPRODUCTOR MUSIC BT", ::openMusic)
+        multimediaButton(panel, "REPRODUCIR / PAUSAR", ::togglePlayback)
         multimediaButton(panel, "RADIO", ::openRadio)
         multimediaButton(panel, "YOUTUBE", ::openYoutube)
+    }
+
+    private fun togglePlayback() {
+        val activeController = controller
+        if (activeController == null) {
+            sendMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+        } else if (isPlaying) {
+            activeController.transportControls.pause()
+        } else {
+            activeController.transportControls.play()
+        }
     }
 
     private fun multimediaButton(panel: LinearLayout, caption: String, action: () -> Unit) {
@@ -720,6 +724,7 @@ class MainActivity : Activity() {
     }
 
     private fun showManager() {
+        buildEditOverlay()
         editOverlay.visibility = View.VISIBLE
         tabsBar.bringToFront()
         bottomBar.bringToFront()
@@ -1082,6 +1087,7 @@ class MainActivity : Activity() {
     }
 
     private fun buildEditOverlay() {
+        if (::editOverlay.isInitialized) root.removeView(editOverlay)
         editOverlay = FrameLayout(this).apply {
             setBackgroundColor(0xAA02060E.toInt())
             visibility = View.GONE
@@ -1125,7 +1131,9 @@ class MainActivity : Activity() {
             text = "LISTO   ×"
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            setOnClickListener { editOverlay.visibility = View.GONE }
+            setOnClickListener {
+                if (selectedTab == "HOME") editOverlay.visibility = View.GONE else showTabContent(selectedTab)
+            }
         }
         editOverlay.addView(close, lp(760f, 575f, 100f, 42f))
         root.addView(editOverlay, FrameLayout.LayoutParams(MP, MP))
@@ -1467,6 +1475,7 @@ class MainActivity : Activity() {
         apps = appCatalog.loadLauncherApps()
         drawerGrid.adapter = AppAdapter(apps)
         drawer.visibility = View.VISIBLE
+        drawer.bringToFront()
     }
 
     private fun closeDrawer() {
