@@ -121,6 +121,7 @@ class MainActivity : Activity() {
     private var panelStartOffsetY = 0f
     private var panelDragViews: List<Triple<View, Int, Int>> = emptyList()
     private var panelLongPressTask: Runnable? = null
+    private var moveModePanelId: String? = null
 
     // ---- Estado ----
     private var nightMode = false
@@ -939,15 +940,88 @@ class MainActivity : Activity() {
                 view.layoutParams = lp
             }
         }
+        for (region in panelRegions) {
+            val hidden = prefs.getBoolean("panel.${region.id}.hidden", false)
+            root.childrenForPanel(region.id).forEach { it.visibility = if (hidden) View.GONE else View.VISIBLE }
+        }
     }
 
     private fun ViewGroup.childrenForPanel(id: String): List<View> =
         (0 until childCount).map { getChildAt(it) }.filter { it.tag == "movable-panel:$id" }
 
     private fun panelAt(x: Float, y: Float): PanelRegion? = panelRegions.firstOrNull { region ->
+        if (prefs.getBoolean("panel.${region.id}.hidden", false)) return@firstOrNull false
         val left = region.left + prefs.getFloat("panel.${region.id}.x", 0f)
         val top = region.top + prefs.getFloat("panel.${region.id}.y", 0f)
         x >= left && x <= left + region.width && y >= top && y <= top + region.height
+    }
+
+    private fun showPanelEditor(id: String) {
+        val region = panelRegions.firstOrNull { it.id == id } ?: return
+        val title = when (id) {
+            "vehicle" -> "Vehículo y velocímetro"
+            "clock" -> "Reloj y fecha"
+            "trip" -> "Viaje y clima"
+            "dock" -> "Accesos rápidos"
+            "media" -> "Reproductor multimedia"
+            "bottom" -> "Barra inferior"
+            else -> "Panel"
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle(title)
+            .setItems(arrayOf("Mover panel", "Ocultar panel", "Restaurar este panel")) { _, which ->
+                when (which) {
+                    0 -> {
+                        moveModePanelId = id
+                        toast("Toca y arrastra el panel para moverlo.")
+                    }
+                    1 -> {
+                        prefs.edit().putBoolean("panel.$id.hidden", true).apply()
+                        root.childrenForPanel(id).forEach { it.visibility = View.GONE }
+                        toast("Panel oculto. Mantén pulsada un área vacía para recuperarlo.")
+                    }
+                    2 -> {
+                        prefs.edit()
+                            .putBoolean("panel.$id.hidden", false)
+                            .putFloat("panel.$id.x", 0f)
+                            .putFloat("panel.$id.y", 0f)
+                            .apply()
+                        configureMovablePanels()
+                        toast("Panel restaurado a su posición original.")
+                    }
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun showHiddenPanelsDialog() {
+        val hidden = panelRegions.filter { prefs.getBoolean("panel.${it.id}.hidden", false) }
+        if (hidden.isEmpty()) {
+            toast("Mantén pulsado un panel para editarlo.")
+            return
+        }
+        val labels = hidden.map { region ->
+            when (region.id) {
+                "vehicle" -> "Vehículo y velocímetro"
+                "clock" -> "Reloj y fecha"
+                "trip" -> "Viaje y clima"
+                "dock" -> "Accesos rápidos"
+                "media" -> "Reproductor multimedia"
+                "bottom" -> "Barra inferior"
+                else -> region.id
+            }
+        }.toTypedArray()
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Recuperar panel")
+            .setItems(labels) { _, which ->
+                val id = hidden[which].id
+                prefs.edit().putBoolean("panel.$id.hidden", false).apply()
+                configureMovablePanels()
+                toast("Panel recuperado.")
+            }
+            .setNegativeButton("Cerrar", null)
+            .show()
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -962,19 +1036,26 @@ class MainActivity : Activity() {
                 panelDownY = event.rawY
                 pendingPanelId = if (uiReady && drawer.visibility != View.VISIBLE &&
                     blackout.visibility != View.VISIBLE) panelAt(event.x / sx, event.y / sy)?.id else null
+                val selectedMoveId = moveModePanelId
+                if (selectedMoveId != null && pendingPanelId == selectedMoveId) {
+                    panelDragging = true
+                    panelStartOffsetX = prefs.getFloat("panel.$selectedMoveId.x", 0f)
+                    panelStartOffsetY = prefs.getFloat("panel.$selectedMoveId.y", 0f)
+                    panelDragViews = root.childrenForPanel(selectedMoveId).mapNotNull { view ->
+                        val lp = view.layoutParams as? FrameLayout.LayoutParams ?: return@mapNotNull null
+                        Triple(view, lp.leftMargin, lp.topMargin)
+                    }
+                    moveModePanelId = null
+                }
                 val id = pendingPanelId
                 if (id != null) {
                     panelLongPressTask = Runnable {
-                        if (pendingPanelId == id && uiReady) {
-                            panelDragging = true
-                            panelStartOffsetX = prefs.getFloat("panel.$id.x", 0f)
-                            panelStartOffsetY = prefs.getFloat("panel.$id.y", 0f)
-                            panelDragViews = root.childrenForPanel(id).mapNotNull { view ->
-                                val lp = view.layoutParams as? FrameLayout.LayoutParams ?: return@mapNotNull null
-                                Triple(view, lp.leftMargin, lp.topMargin)
-                            }
-                            toast("Panel seleccionado: mantén y arrastra para mover.")
-                        }
+                        if (pendingPanelId == id && uiReady && !panelDragging) showPanelEditor(id)
+                    }
+                    handler.postDelayed(panelLongPressTask!!, ViewConfiguration.getLongPressTimeout().toLong())
+                } else if (uiReady && drawer.visibility != View.VISIBLE && blackout.visibility != View.VISIBLE) {
+                    panelLongPressTask = Runnable {
+                        if (pendingPanelId == null && uiReady) showHiddenPanelsDialog()
                     }
                     handler.postDelayed(panelLongPressTask!!, ViewConfiguration.getLongPressTimeout().toLong())
                 }
