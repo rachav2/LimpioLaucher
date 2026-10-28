@@ -19,6 +19,13 @@ Diseñado para **1280×720** y Android 13 (se escala al tamaño real de la venta
   - Modo nocturno: oscurece los colores y baja el brillo de la ventana. Vuelve a tocarlo para quitarlo.
 - Sin OBD2 por ahora, así que no hay consumo ni temperatura del motor.
 
+## Mejoras del dashboard (rama feature/civic-dashboard-v2)
+
+- **Dock dinámico:** muestra hasta cuatro aplicaciones recientes que se hayan abierto desde el launcher. El acceso **Todas las apps** permanece fijo. Android no permite conocer de forma fiable todas las apps abiertas por otros launchers sin conceder acceso de uso; esta versión registra los lanzamientos realizados desde Civic Launcher.
+- **Widget CANbus modular:** `CanBusGateway.kt` recibe estados de solo lectura y el widget puede moverse/redimensionarse manteniéndolo presionado; la posición y tamaño se guardan. `DashboardWidgetHost.kt` sirve de contenedor reutilizable para futuros widgets.
+- **Importante sobre CANbus:** el adaptador escucha el broadcast `com.rachav2.civiclauncher.CANBUS_STATE` con extras booleanos `door_fl`, `door_fr`, `door_rl`, `door_rr`, `trunk`, `hood`, `lights` y `handbrake` (también admite algunos alias). Muchas pantallas usan una API propietaria diferente. Hasta identificar el servicio, broadcast, proveedor o protocolo real del decodificador de esta unidad, el estado permanecerá en “esperando datos”; no se inventan valores ni se transmite al bus del vehículo.
+- **Mapa GPS offline:** desliza la pantalla principal hacia la izquierda para abrir el visor local. La ubicación se obtiene del GPS sin necesitar datos móviles, pero las teselas del mapa deben instalarse aparte. Coloca un archivo MBTiles compatible en `Android/data/com.rachav2.civiclauncher/files/maps/el_salvador.mbtiles`. No se incluye cartografía de terceros en el APK; usa un archivo de una fuente cuya licencia permita el uso offline. El visor lee el esquema raster estándar MBTiles a zoom 13.
+
 ## Compilar el APK (sin instalar nada)
 
 1. Sube este proyecto a GitHub (rama `main`).
