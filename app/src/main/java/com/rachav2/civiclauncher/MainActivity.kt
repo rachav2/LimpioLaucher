@@ -62,6 +62,8 @@ import kotlin.math.roundToInt
 private const val MP = ViewGroup.LayoutParams.MATCH_PARENT
 private const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
 
+private data class PanelRegion(val id: String, val left: Float, val top: Float, val width: Float, val height: Float)
+
 /**
  * Launcher para pantallas Android de auto, con el diseño "Honda Civic 2012".
  *
@@ -110,15 +112,29 @@ class MainActivity : Activity() {
     private lateinit var drawer: FrameLayout
     private lateinit var drawerGrid: GridView
     private lateinit var recentDock: LinearLayout
-    private lateinit var canWidgetHost: DashboardWidgetHost
-    private lateinit var canStatusText: TextView
+    private var pendingPanelId: String? = null
+    private var panelDragging = false
+    private var panelDownX = 0f
+    private var panelDownY = 0f
+    private var panelStartOffsetX = 0f
+    private var panelStartOffsetY = 0f
+    private var panelDragViews: List<Triple<View, Int, Int>> = emptyList()
+    private var panelLongPressTask: Runnable? = null
 
     // ---- Estado ----
     private var nightMode = false
     private var lastDate = ""
-    private var canBusGateway: CanBusGateway? = null
     private var swipeDownX = 0f
     private var swipeDownY = 0f
+
+    private val panelRegions = listOf(
+        PanelRegion("vehicle", 20f, 20f, 500f, 440f),
+        PanelRegion("clock", 540f, 20f, 340f, 170f),
+        PanelRegion("trip", 540f, 210f, 340f, 250f),
+        PanelRegion("dock", 20f, 480f, 860f, 140f),
+        PanelRegion("media", 900f, 20f, 360f, 600f),
+        PanelRegion("bottom", 20f, 636f, 1240f, 68f)
+    )
 
     // ---- Ubicación y clima ----
     private var placeName: String? = null
@@ -225,13 +241,11 @@ class MainActivity : Activity() {
         handler.removeCallbacks(ticker)
         handler.post(ticker)
         if (uiReady) refreshDynamic()
-        startCanBusGateway()
     }
 
     override fun onPause() {
         super.onPause()
         resumed = false
-        stopCanBusGateway()
         handler.removeCallbacks(ticker)
         stopGps()
         try {
@@ -383,9 +397,8 @@ class MainActivity : Activity() {
         buildMediaCard()
         buildDrawer()
         buildBottomBar()
-        buildCanWidgetHost()
+        configureMovablePanels()
         buildOverlays()
-        installMapSwipeGesture()
 
         uiReady = true
         showIdle()
@@ -898,60 +911,134 @@ class MainActivity : Activity() {
     }
 
 
-    // ---- Widget CANbus: puente pasivo, sin transmitir al bus del vehículo ----
+    // ---- Personalización de paneles ----
 
-    private fun buildCanWidgetHost() {
-        canWidgetHost = DashboardWidgetHost(this, prefs, ss)
-        canStatusText = label("CANbus · esperando datos de la pantalla", 17f, textMuted)
-        canStatusText.gravity = Gravity.CENTER_VERTICAL
-        canStatusText.setPadding(px(10f), 0, px(10f), 0)
-        canWidgetHost.addWidget(
-            id = "vehicle_status",
-            content = canStatusText,
-            left = 30f, top = 452f, width = 480f, height = 26f
-        )
-        root.addView(canWidgetHost, FrameLayout.LayoutParams(MP, MP))
-    }
-
-    private fun startCanBusGateway() {
-        if (canBusGateway != null) return
-        canBusGateway = CanBusGateway(this) { state ->
-            runOnUiThread {
-                if (!::canStatusText.isInitialized) return@runOnUiThread
-                canStatusText.text = state.toDisplayText()
-                canStatusText.setTextColor(if (state.hasAlerts) 0xFFFFC857.toInt() else lightBlue)
+    private fun configureMovablePanels() {
+        // Etiqueta las vistas superiores según su tarjeta para mover cada grupo como una unidad.
+        for (i in 0 until root.childCount) {
+            val view = root.getChildAt(i)
+            val lp = view.layoutParams as? FrameLayout.LayoutParams ?: continue
+            if (lp.width < 0 || lp.height < 0 || lp.width >= uiW * 0.9f || lp.height >= uiH * 0.9f) continue
+            val centerX = (lp.leftMargin + lp.width / 2f) / sx
+            val centerY = (lp.topMargin + lp.height / 2f) / sy
+            val region = panelRegions.firstOrNull {
+                centerX >= it.left && centerX <= it.left + it.width &&
+                    centerY >= it.top && centerY <= it.top + it.height
+            } ?: continue
+            view.tag = "movable-panel:${region.id}"
+        }
+        for (region in panelRegions) {
+            val dx = xx(prefs.getFloat("panel.${region.id}.x", 0f))
+            val dy = yy(prefs.getFloat("panel.${region.id}.y", 0f))
+            if (dx == 0 && dy == 0) continue
+            for (view in root.childrenForPanel(region.id)) {
+                val lp = view.layoutParams as FrameLayout.LayoutParams
+                lp.leftMargin += dx
+                lp.topMargin += dy
+                view.layoutParams = lp
             }
-        }.also { it.start() }
+        }
     }
 
-    private fun stopCanBusGateway() {
-        canBusGateway?.stop()
-        canBusGateway = null
+    private fun ViewGroup.childrenForPanel(id: String): List<View> =
+        (0 until childCount).map { getChildAt(it) }.filter { it.tag == "movable-panel:$id" }
+
+    private fun panelAt(x: Float, y: Float): PanelRegion? = panelRegions.firstOrNull { region ->
+        val left = region.left + prefs.getFloat("panel.${region.id}.x", 0f)
+        val top = region.top + prefs.getFloat("panel.${region.id}.y", 0f)
+        x >= left && x <= left + region.width && y >= top && y <= top + region.height
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            swipeDownX = event.rawX
-            swipeDownY = event.rawY
-        } else if (event.actionMasked == MotionEvent.ACTION_UP) {
-            val dx = event.rawX - swipeDownX
-            val dy = event.rawY - swipeDownY
-            if (uiReady && drawer.visibility != View.VISIBLE &&
-                blackout.visibility != View.VISIBLE &&
-                kotlin.math.abs(dx) > px(110f) &&
-                kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.35f) {
-                if (dx < 0f) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                swipeDownX = event.rawX
+                swipeDownY = event.rawY
+                panelLongPressTask?.let { handler.removeCallbacks(it) }
+                panelDragging = false
+                panelDragViews = emptyList()
+                panelDownX = event.rawX
+                panelDownY = event.rawY
+                pendingPanelId = if (uiReady && drawer.visibility != View.VISIBLE &&
+                    blackout.visibility != View.VISIBLE) panelAt(event.x / sx, event.y / sy)?.id else null
+                val id = pendingPanelId
+                if (id != null) {
+                    panelLongPressTask = Runnable {
+                        if (pendingPanelId == id && uiReady) {
+                            panelDragging = true
+                            panelStartOffsetX = prefs.getFloat("panel.$id.x", 0f)
+                            panelStartOffsetY = prefs.getFloat("panel.$id.y", 0f)
+                            panelDragViews = root.childrenForPanel(id).mapNotNull { view ->
+                                val lp = view.layoutParams as? FrameLayout.LayoutParams ?: return@mapNotNull null
+                                Triple(view, lp.leftMargin, lp.topMargin)
+                            }
+                            toast("Panel seleccionado: mantén y arrastra para mover.")
+                        }
+                    }
+                    handler.postDelayed(panelLongPressTask!!, ViewConfiguration.getLongPressTimeout().toLong())
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (panelDragging) {
+                    val dx = (event.rawX - panelDownX).roundToInt()
+                    val dy = (event.rawY - panelDownY).roundToInt()
+                    for ((view, left, top) in panelDragViews) {
+                        val lp = view.layoutParams as? FrameLayout.LayoutParams ?: continue
+                        lp.leftMargin = left + dx
+                        lp.topMargin = top + dy
+                        view.layoutParams = lp
+                    }
+                    return true
+                }
+                if (pendingPanelId != null &&
+                    (kotlin.math.abs(event.rawX - panelDownX) > ViewConfiguration.get(this).scaledTouchSlop ||
+                     kotlin.math.abs(event.rawY - panelDownY) > ViewConfiguration.get(this).scaledTouchSlop)) {
+                    panelLongPressTask?.let { handler.removeCallbacks(it) }
+                    panelLongPressTask = null
+                    pendingPanelId = null
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                panelLongPressTask?.let { handler.removeCallbacks(it) }
+                panelLongPressTask = null
+                if (panelDragging) {
+                    val id = pendingPanelId
+                    if (id != null) {
+                        val dx = (event.rawX - panelDownX) / sx
+                        val dy = (event.rawY - panelDownY) / sy
+                        prefs.edit()
+                            .putFloat("panel.$id.x", panelStartOffsetX + dx)
+                            .putFloat("panel.$id.y", panelStartOffsetY + dy)
+                            .apply()
+                    }
+                    panelDragging = false
+                    pendingPanelId = null
+                    panelDragViews = emptyList()
+                    toast("Posición guardada")
+                    return true
+                }
+                pendingPanelId = null
+                val dx = event.rawX - swipeDownX
+                val dy = event.rawY - swipeDownY
+                if (uiReady && drawer.visibility != View.VISIBLE &&
+                    blackout.visibility != View.VISIBLE &&
+                    kotlin.math.abs(dx) > px(110f) &&
+                    kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.35f && dx < 0f) {
                     startSafe(Intent(this, OfflineMapActivity::class.java))
                     return true
                 }
             }
+            MotionEvent.ACTION_CANCEL -> {
+                panelLongPressTask?.let { handler.removeCallbacks(it) }
+                panelLongPressTask = null
+                val wasDragging = panelDragging
+                panelDragging = false
+                pendingPanelId = null
+                panelDragViews = emptyList()
+                if (wasDragging) return true
+            }
         }
         return super.dispatchTouchEvent(event)
-    }
-
-    private fun installMapSwipeGesture() {
-        // El gesto se detecta en dispatchTouchEvent para que funcione incluso sobre widgets.
-        root.setOnTouchListener(null)
     }
 
     // ---- Modo nocturno y pantalla negra ----
