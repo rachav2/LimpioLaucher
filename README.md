@@ -22,9 +22,8 @@ Diseñado para **1280×720** y Android 13 (se escala al tamaño real de la venta
 ## Mejoras del dashboard (rama feature/civic-dashboard-v2)
 
 - **Dock dinámico:** muestra hasta cuatro aplicaciones recientes que se hayan abierto desde el launcher. El acceso **Todas las apps** permanece fijo. Android no permite conocer de forma fiable todas las apps abiertas por otros launchers sin conceder acceso de uso; esta versión registra los lanzamientos realizados desde Civic Launcher.
-- **Widget CANbus modular:** `CanBusGateway.kt` recibe estados de solo lectura y el widget puede moverse/redimensionarse manteniéndolo presionado; la posición y tamaño se guardan. `DashboardWidgetHost.kt` sirve de contenedor reutilizable para futuros widgets.
-- **Importante sobre CANbus:** el adaptador escucha el broadcast `com.rachav2.civiclauncher.CANBUS_STATE` con extras booleanos `door_fl`, `door_fr`, `door_rl`, `door_rr`, `trunk`, `hood`, `lights` y `handbrake` (también admite algunos alias). Muchas pantallas usan una API propietaria diferente. Hasta identificar el servicio, broadcast, proveedor o protocolo real del decodificador de esta unidad, el estado permanecerá en “esperando datos”; no se inventan valores ni se transmite al bus del vehículo.
-- **Mapa GPS offline:** desliza la pantalla principal hacia la izquierda para abrir el visor local. La ubicación se obtiene del GPS sin necesitar datos móviles, pero las teselas del mapa deben instalarse aparte. Coloca un archivo MBTiles compatible en `Android/data/com.rachav2.civiclauncher/files/maps/el_salvador.mbtiles`. No se incluye cartografía de terceros en el APK; usa un archivo de una fuente cuya licencia permita el uso offline. El visor lee el esquema raster estándar MBTiles a zoom 13.
+- **Paneles movibles:** mantén presionada una tarjeta (vehículo, reloj, viaje, dock, reproductor o barra inferior) hasta que se active el arrastre; mueve el dedo y suelta para guardar la posición. Las posiciones se conservan entre reinicios. Los botones siguen funcionando con un toque normal.
+- **Mapa GPS offline:** desliza la pantalla principal hacia la izquierda para abrir el visor local. La ubicación se obtiene del GPS sin necesitar datos móviles. Usa **Cargar mapa MBTiles** para elegir el archivo desde Descargas/USB; la app lo copia a `Android/data/com.rachav2.civiclauncher/files/maps/el_salvador.mbtiles`. Debe ser un MBTiles **ráster** (teselas PNG/JPG) que incluya zoom 13; los MBTiles vectoriales PBF no funcionan con este visor sencillo. No se incluye cartografía de terceros en el APK.
 
 ## Compilar el APK (sin instalar nada)
 
@@ -48,6 +47,11 @@ Android exige un permiso especial para leer la canción que suena:
    (Toca la tarjeta del reproductor y te lleva ahí.)
 2. En Android 13, si aparece "Ajuste restringido" porque el APK se instaló fuera de Play Store:
    Ajustes > Aplicaciones > Civic Launcher > menú ⋮ > **Permitir ajustes restringidos**, y vuelve al paso anterior.
+
+## Conseguir un mapa offline
+
+- Puedes crear un MBTiles ráster con QGIS/MapTiler a partir de cartografía cuya licencia permita descargas y uso offline. Revisa siempre las condiciones de la fuente; el servidor estándar de teselas de OpenStreetMap prohíbe descargar masivamente teselas para uso offline.
+- Recursos para empezar: [BBBike: extractos de OpenStreetMap](https://extract.bbbike.org/?lang=es) y [guía de MBTiles ráster](https://milgps.com/userguide/frequently-asked-questions/creating-offline-maps/). Comprueba el formato antes de usar el archivo: no todo archivo `.mbtiles` es compatible.
 
 ## Personalizar
 
