@@ -115,7 +115,7 @@ class GoogleMapActivity : Activity(), OnMapReadyCallback {
         destinationInput = EditText(this).apply {
             hint = "Buscar destino o dirección"
             textSize = 17f
-            singleLine = true
+            setSingleLine(true)
             setTextColor(Color.WHITE)
             setHintTextColor(0xFF9DB0CB.toInt())
             setPadding(dp(14), 0, dp(14), 0)
