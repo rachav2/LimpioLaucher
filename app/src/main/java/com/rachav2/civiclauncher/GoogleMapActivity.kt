@@ -43,14 +43,19 @@ class GoogleMapActivity : Activity(), OnMapReadyCallback {
             return
         }
 
-        val map = MapView(this)
-        mapView = map
-        map.onCreate(savedInstanceState)
-        root.addView(map, FrameLayout.LayoutParams(-1, -1))
-        root.addView(buildTopBar(), FrameLayout.LayoutParams(-1, dp(66), Gravity.TOP))
-        root.addView(buildBottomControls(), FrameLayout.LayoutParams(-1, dp(104), Gravity.BOTTOM))
-        setContentView(root)
-        map.getMapAsync(this)
+        try {
+            val map = MapView(this)
+            mapView = map
+            map.onCreate(savedInstanceState)
+            root.addView(map, FrameLayout.LayoutParams(-1, -1))
+            root.addView(buildTopBar(), FrameLayout.LayoutParams(-1, dp(66), Gravity.TOP))
+            root.addView(buildBottomControls(), FrameLayout.LayoutParams(-1, dp(104), Gravity.BOTTOM))
+            setContentView(root)
+            map.getMapAsync(this)
+        } catch (e: Exception) {
+            mapView = null
+            setContentView(buildMapFallback("No se pudo iniciar el mapa integrado. Revisa la clave de Google Maps y los servicios de Google Play."))
+        }
     }
 
     private fun hasMapsApiKey(): Boolean = try {
@@ -82,6 +87,34 @@ class GoogleMapActivity : Activity(), OnMapReadyCallback {
         }, LinearLayout.LayoutParams(-1, -2))
         column.addView(actionButton("Abrir Google Maps") { openGoogleMaps(null) },
             LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(8) })
+        column.addView(actionButton("Volver al launcher") { finish() },
+            LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(10) })
+        return column
+    }
+
+    private fun buildMapFallback(message: String): View {
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(36), dp(24), dp(36), dp(24))
+            setBackgroundColor(Color.rgb(5, 12, 24))
+        }
+        column.addView(TextView(this).apply {
+            text = "MAPA NO DISPONIBLE"
+            setTextColor(Color.rgb(108, 180, 255))
+            textSize = 26f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(-1, -2))
+        column.addView(TextView(this).apply {
+            text = message
+            setTextColor(Color.WHITE)
+            textSize = 17f
+            gravity = Gravity.CENTER
+            setPadding(0, dp(18), 0, dp(22))
+        }, LinearLayout.LayoutParams(-1, -2))
+        column.addView(actionButton("Abrir Google Maps") { openGoogleMaps(null) },
+            LinearLayout.LayoutParams(-1, dp(54)))
         column.addView(actionButton("Volver al launcher") { finish() },
             LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(10) })
         return column
@@ -153,7 +186,8 @@ class GoogleMapActivity : Activity(), OnMapReadyCallback {
         }
 
     override fun onMapReady(map: GoogleMap) {
-        googleMap = map
+        try {
+            googleMap = map
         map.uiSettings.isCompassEnabled = true
         map.uiSettings.isMapToolbarEnabled = false
         map.uiSettings.isZoomControlsEnabled = false
@@ -179,6 +213,10 @@ class GoogleMapActivity : Activity(), OnMapReadyCallback {
             try { map.isMyLocationEnabled = true } catch (_: SecurityException) { }
         } else {
             requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), locationRequestCode)
+        }
+        } catch (e: Exception) {
+            googleMap = null
+            setContentView(buildMapFallback("Google Maps no pudo cargar. Comprueba la clave de API, que Maps SDK for Android esté habilitado y que haya conexión a internet."))
         }
     }
 
