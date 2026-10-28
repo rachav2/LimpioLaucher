@@ -999,7 +999,7 @@ class MainActivity : Activity() {
                     blackout.visibility != View.VISIBLE &&
                     kotlin.math.abs(dx) > px(110f) &&
                     kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.35f && dx < 0f) {
-                    startSafe(Intent(this, GoogleMapActivity::class.java))
+                    if (!openMapScreen()) toast("No se pudo abrir la pantalla de navegación")
                     return true
                 }
             }
@@ -1163,11 +1163,19 @@ class MainActivity : Activity() {
     }
 
     private fun openNavigation() {
-        if (startSafe(Intent(this, GoogleMapActivity::class.java))) return
+        if (openMapScreen()) return
         if (launchPackage("com.google.android.apps.maps")) return
         if (startSafe(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0")))) return
         openDrawer()
         toast("No encontré una app de mapas. Elige una de la lista.")
+    }
+
+    /** Opens the in-app screen in the current task; external apps use startSafe(). */
+    private fun openMapScreen(): Boolean = try {
+        startActivity(Intent(this, GoogleMapActivity::class.java))
+        true
+    } catch (_: Exception) {
+        false
     }
 
     private fun findMusicBt(): ComponentName? = appCatalog.find(InstalledAppsCatalog.MUSIC_BT_EXACT, InstalledAppsCatalog.MUSIC_BT_CONTAINS)

@@ -85,28 +85,13 @@ class GoogleMapActivity : Activity() {
             background = rounded(panel, dp(20), 0xFF1E3A66.toInt())
             clipToOutline = true
         }
-        mapWeb = WebView(this).apply {
-            setBackgroundColor(0xFF101F35.toInt())
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.loadsImagesAutomatically = true
-            settings.javaScriptCanOpenWindowsAutomatically = false
-            webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    statusText.text = if (provider == Provider.GOOGLE)
-                        "Google Maps · integrado en el panel" else "Waze · mapa web integrado"
-                }
-                override fun onReceivedError(
-                    view: WebView?, request: android.webkit.WebResourceRequest?,
-                    error: android.webkit.WebResourceError?
-                ) {
-                    if (request?.isForMainFrame == true) statusText.text =
-                        "No se pudo cargar el mapa; revisa la conexión"
-                }
-            }
-            webChromeClient = WebChromeClient()
+        val embeddedMap = createMapWebView()
+        if (embeddedMap != null) {
+            mapWeb = embeddedMap
+            mapFrame.addView(mapWeb, FrameLayout.LayoutParams(-1, -1))
+        } else {
+            showMapUnavailable()
         }
-        mapFrame.addView(mapWeb, FrameLayout.LayoutParams(-1, -1))
         root.addView(mapFrame, LinearLayout.LayoutParams(-1, 0, 1f))
 
         val controls = LinearLayout(this).apply {
@@ -161,7 +146,57 @@ class GoogleMapActivity : Activity() {
         } else {
             "https://www.waze.com/live-map/directions?to=" + Uri.encode(query)
         }
-        mapWeb.loadUrl(url)
+        try {
+            mapWeb.loadUrl(url)
+        } catch (_: Exception) {
+            statusText.text = "No se pudo abrir el mapa web; puedes usar la app de navegación"
+        }
+    }
+
+    private fun createMapWebView(): WebView? = try {
+        WebView(this).apply {
+            setBackgroundColor(0xFF101F35.toInt())
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.loadsImagesAutomatically = true
+            settings.javaScriptCanOpenWindowsAutomatically = false
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    statusText.text = if (provider == Provider.GOOGLE)
+                        "Google Maps · integrado en el panel" else "Waze · mapa web integrado"
+                }
+
+                override fun onReceivedError(
+                    view: WebView?, request: android.webkit.WebResourceRequest?,
+                    error: android.webkit.WebResourceError?
+                ) {
+                    if (request?.isForMainFrame == true) {
+                        statusText.text = "No se pudo cargar el mapa; revisa la conexión"
+                    }
+                }
+            }
+            webChromeClient = WebChromeClient()
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Some car head units omit or disable Android System WebView. Keep navigation usable. */
+    private fun showMapUnavailable() {
+        statusText.text = "El navegador integrado no está disponible"
+        val fallback = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+            addView(text("No se pudo iniciar el mapa integrado", 18f, Color.WHITE, true))
+            addView(
+                text("Abre una aplicación de navegación instalada en la unidad.", 14f, muted),
+                LinearLayout.LayoutParams(-2, dp(48))
+            )
+            addView(actionButton("Abrir Google Maps") { openSelectedApp() })
+            addView(actionButton("Abrir Waze") { chooseProvider(Provider.WAZE); openSelectedApp() })
+        }
+        mapFrame.addView(fallback, FrameLayout.LayoutParams(-1, -1))
     }
 
     private fun openSelectedApp() {
