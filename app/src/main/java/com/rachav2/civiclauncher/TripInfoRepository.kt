@@ -8,8 +8,11 @@ import android.os.Looper
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.util.Locale
 import java.util.concurrent.Executors
+import kotlin.math.cos
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** Performs reverse geocoding and weather requests away from the UI thread. */
@@ -71,6 +74,15 @@ internal class TripInfoRepository(
 
         if (placeRequest) executor.execute { fetchPlace(location) }
         if (weatherRequest) executor.execute { fetchWeather(location) }
+    }
+
+    /** Looks for a nearby OpenStreetMap road with an explicit maxspeed tag. */
+    fun lookupSpeedLimit(location: Location, onResult: (Int?) -> Unit) {
+        val point = Location(location)
+        executor.execute {
+            val limit = findNearbySpeedLimit(point)
+            if (isOpen()) mainHandler.post { if (isOpen()) onResult(limit) }
+        }
     }
 
     fun close() {
@@ -177,6 +189,75 @@ internal class TripInfoRepository(
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun findNearbySpeedLimit(location: Location): Int? {
+        val query = "[out:json][timeout:12];way(around:35,${location.latitude},${location.longitude})[\"highway\"][\"maxspeed\"];out tags geom;"
+        val endpoint = "https://overpass-api.de/api/interpreter?data=" + URLEncoder.encode(query, "UTF-8")
+        val body = httpGet(endpoint) ?: return null
+        return try {
+            val elements = JSONObject(body).optJSONArray("elements") ?: return null
+            var closestDistance = Float.MAX_VALUE
+            var closestLimit: Int? = null
+            for (i in 0 until elements.length()) {
+                val way = elements.optJSONObject(i) ?: continue
+                val tags = way.optJSONObject("tags") ?: continue
+                val rawLimit = tags.optString("maxspeed").lowercase(Locale.ROOT)
+                val number = Regex("\\d+(?:\\.\\d+)?").find(rawLimit)?.value?.toFloatOrNull() ?: continue
+                val limit = if (rawLimit.contains("mph")) (number * 1.60934f).roundToInt() else number.roundToInt()
+                if (limit !in 10..180) continue
+                val geometry = way.optJSONArray("geometry") ?: continue
+                var roadDistance = Float.MAX_VALUE
+                for (pointIndex in 0 until geometry.length()) {
+                    val a = geometry.optJSONObject(pointIndex) ?: continue
+                    val aLat = a.optDouble("lat", Double.NaN)
+                    val aLon = a.optDouble("lon", Double.NaN)
+                    if (!aLat.isFinite() || !aLon.isFinite()) continue
+                    if (pointIndex == geometry.length() - 1) {
+                        roadDistance = min(roadDistance, distanceMeters(location.latitude, location.longitude, aLat, aLon))
+                        continue
+                    }
+                    val b = geometry.optJSONObject(pointIndex + 1) ?: continue
+                    val bLat = b.optDouble("lat", Double.NaN)
+                    val bLon = b.optDouble("lon", Double.NaN)
+                    if (!bLat.isFinite() || !bLon.isFinite()) continue
+                    roadDistance = min(roadDistance, segmentDistanceMeters(location.latitude, location.longitude, aLat, aLon, bLat, bLon))
+                }
+                if (roadDistance < closestDistance) {
+                    closestDistance = roadDistance
+                    closestLimit = limit
+                }
+            }
+            closestLimit
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun segmentDistanceMeters(lat: Double, lon: Double, aLat: Double, aLon: Double, bLat: Double, bLon: Double): Float {
+        val metersPerLat = 111_320.0
+        val metersPerLon = metersPerLat * cos(Math.toRadians(lat))
+        val px = 0.0
+        val py = 0.0
+        val ax = (aLon - lon) * metersPerLon
+        val ay = (aLat - lat) * metersPerLat
+        val bx = (bLon - lon) * metersPerLon
+        val by = (bLat - lat) * metersPerLat
+        val dx = bx - ax
+        val dy = by - ay
+        val lengthSquared = dx * dx + dy * dy
+        val t = if (lengthSquared == 0.0) 0.0 else ((px - ax) * dx + (py - ay) * dy) / lengthSquared
+        val closestX = ax + t.coerceIn(0.0, 1.0) * dx
+        val closestY = ay + t.coerceIn(0.0, 1.0) * dy
+        return kotlin.math.sqrt(closestX * closestX + closestY * closestY).toFloat()
+    }
+
+    private fun distanceMeters(lat: Double, lon: Double, otherLat: Double, otherLon: Double): Float {
+        val metersPerLat = 111_320.0
+        val metersPerLon = metersPerLat * cos(Math.toRadians(lat))
+        val dx = (otherLon - lon) * metersPerLon
+        val dy = (otherLat - lat) * metersPerLat
+        return kotlin.math.sqrt(dx * dx + dy * dy).toFloat()
     }
 
     private fun httpGet(url: String): String? {
