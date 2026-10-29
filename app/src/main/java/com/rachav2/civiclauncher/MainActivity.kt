@@ -68,22 +68,19 @@ private const val TABS_Y = 12f
 private const val TABS_H = 52f
 private const val CONTENT_Y = 78f
 private const val CARD_H = 380f
-private const val CLOCK_H = 180f
-private const val WEATHER_Y = 272f
-private const val WEATHER_H = 186f
 private const val DOCK_Y = 472f
 private const val DOCK_H = 150f
 private const val DOCK_W = 862f
 private const val BAR_Y = 636f
 private const val BAR_H = 68f
 private const val VEHICLE_X = 20f
-private const val VEHICLE_W = 345f
-private const val MID_X = 379f
-private const val MID_W = 238f
-private const val TRIP_X = 631f
-private const val TRIP_W = 251f
-private const val MEDIA_X = 896f
-private const val MEDIA_W = 364f
+private const val VEHICLE_W = 390f
+private const val MID_X = 425f
+private const val MID_W = 430f
+private const val CONNECT_X = 870f
+private const val CONNECT_W = 390f
+private const val MEDIA_X = CONNECT_X
+private const val MEDIA_W = CONNECT_W
 private const val MEDIA_H = 544f
 private const val DOCK_SLOTS = 4
 
@@ -123,9 +120,12 @@ class MainActivity : Activity() {
     private lateinit var greetingText: TextView
     private lateinit var weatherConditionText: TextView
     private lateinit var weatherIcon: TextView
-    private lateinit var tripWeatherText: TextView
     private lateinit var dateText: TextView
     private lateinit var locationText: TextView
+    private lateinit var carConnectIcon: ImageView
+    private lateinit var carConnectTitle: TextView
+    private lateinit var carConnectHint: TextView
+    private lateinit var carConnectButton: TextView
     private lateinit var artView: ImageView
     private lateinit var titleText: TextView
     private lateinit var artistText: TextView
@@ -142,6 +142,7 @@ class MainActivity : Activity() {
     private lateinit var bottomBar: LinearLayout
     private lateinit var mediaCardView: LinearLayout
     private lateinit var mediaEditButton: TextView
+    private lateinit var carConnectCard: LinearLayout
     private lateinit var tripSpeedometer: SpeedometerView
     private lateinit var tripLimitCard: View
     private lateinit var tripLimitSign: TextView
@@ -195,9 +196,8 @@ class MainActivity : Activity() {
 
     private val panelRegions = listOf(
         PanelRegion("vehicle", VEHICLE_X, CONTENT_Y, VEHICLE_W, CARD_H),
-        PanelRegion("clock", MID_X, CONTENT_Y, MID_W, CLOCK_H),
-        PanelRegion("weather", MID_X, WEATHER_Y, MID_W, WEATHER_H),
-        PanelRegion("trip", TRIP_X, CONTENT_Y, TRIP_W, CARD_H),
+        PanelRegion("clock", MID_X, CONTENT_Y, MID_W, CARD_H),
+        PanelRegion("connect", CONNECT_X, CONTENT_Y, CONNECT_W, CARD_H),
         PanelRegion("dock", VEHICLE_X, DOCK_Y, DOCK_W, DOCK_H),
         PanelRegion("media", MEDIA_X, CONTENT_Y, MEDIA_W, MEDIA_H),
         PanelRegion("bottom", 20f, BAR_Y, 1240f, BAR_H)
@@ -530,8 +530,7 @@ class MainActivity : Activity() {
         buildVehicleCard()
         buildTabs()
         buildClockCard()
-        buildTripCard()
-        buildWeatherCard()
+        buildCarConnectCard()
         buildDockCard()
         buildMediaCard()
         buildDrawer()
@@ -546,6 +545,7 @@ class MainActivity : Activity() {
                 view !== nightOverlay && view !== blackout) homeViews.add(view)
         }
         showSelectedTab()
+        updateCarConnectCard()
         restackOverlays()
 
         uiReady = true
@@ -556,6 +556,7 @@ class MainActivity : Activity() {
     private fun refreshDynamic() {
         refreshRecentDock()
         setupMedia()
+        updateCarConnectCard()
         applyNight()
         updateTripViews()
         updateDate()
@@ -598,7 +599,8 @@ class MainActivity : Activity() {
         root.addView(car, lp(VEHICLE_X + 12f, 304f, VEHICLE_W - 24f, 148f))
     }
 
-    private fun greeting(): String = if (userName.isBlank()) "Civic 2012" else "Hola, $userName"
+    private fun greeting(): String =
+        if (userName.isBlank()) "Hola, Bienvenido" else "Hola, Bienvenido $userName"
 
     private fun tabsParams(): FrameLayout.LayoutParams = lp(20f, TABS_Y, 1240f, TABS_H)
 
@@ -711,6 +713,8 @@ class MainActivity : Activity() {
         if (selectedTab == "HOME") {
             homeViews.forEach { it.visibility = View.VISIBLE }
             mediaCardView.layoutParams = panelParams("media", MEDIA_X, CONTENT_Y, MEDIA_W, MEDIA_H)
+            mediaCardView.visibility = View.GONE
+            mediaEditButton.visibility = View.GONE
             applyPanelVisibility()
         } else {
             homeViews.forEach { it.visibility = View.GONE }
@@ -1130,10 +1134,10 @@ class MainActivity : Activity() {
         restackOverlays()
     }
 
-    // ---- Reloj ----
+    // ---- Tarjeta central: hora, fecha, ubicación y clima ----
 
     private fun buildClockCard() {
-        card(MID_X, CONTENT_Y, MID_W, CLOCK_H)
+        card(MID_X, CONTENT_Y, MID_W, CARD_H)
 
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
@@ -1142,7 +1146,7 @@ class MainActivity : Activity() {
         val time = TextClock(this)
         time.format12Hour = "h:mm"
         time.format24Hour = "HH:mm"
-        styleClock(time, 56f, Color.WHITE, true)
+        styleClock(time, 66f, Color.WHITE, true)
         row.addView(time)
 
         val ampm = TextClock(this)
@@ -1153,14 +1157,33 @@ class MainActivity : Activity() {
             ampm,
             LinearLayout.LayoutParams(WC, WC).apply {
                 leftMargin = px(8f)
-                bottomMargin = px(8f)
+                bottomMargin = px(10f)
             }
         )
-        root.addView(row, lp(MID_X + 18f, CONTENT_Y + 24f, MID_W - 36f, 72f))
+        root.addView(row, lp(MID_X + 24f, CONTENT_Y + 18f, MID_W - 48f, 86f))
 
-        dateText = label("", 18f, textMuted)
-        dateText.maxLines = 2
-        root.addView(dateText, lp(MID_X + 18f, CONTENT_Y + 112f, MID_W - 36f, 52f))
+        dateText = label("", 21f, textMuted)
+        root.addView(dateText, lp(MID_X + 24f, CONTENT_Y + 105f, MID_W - 48f, 32f))
+        root.addView(View(this).apply { setBackgroundColor(0x33FFFFFF) },
+            lp(MID_X + 24f, CONTENT_Y + 150f, MID_W - 48f, 1f))
+
+        root.addView(label("Estamos en", 17f, textMuted, true),
+            lp(MID_X + 24f, CONTENT_Y + 166f, MID_W - 48f, 24f))
+        locationText = label("Buscando ubicación GPS…", 24f, Color.WHITE, true)
+        locationText.maxLines = 2
+        root.addView(locationText, lp(MID_X + 24f, CONTENT_Y + 194f, MID_W - 48f, 50f))
+
+        root.addView(label("El clima está:", 17f, textMuted, true),
+            lp(MID_X + 24f, CONTENT_Y + 254f, MID_W - 48f, 24f))
+        weatherIcon = label("⛅", 54f, Color.WHITE, true).apply { gravity = Gravity.CENTER }
+        root.addView(weatherIcon, lp(MID_X + 26f, CONTENT_Y + 282f, 74f, 62f))
+        weatherValue = label("--°C", 48f, Color.WHITE, true).apply {
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        root.addView(weatherValue, lp(MID_X + 112f, CONTENT_Y + 282f, MID_W - 136f, 62f))
+        weatherConditionText = label("Obteniendo clima…", 18f, Color.WHITE)
+        weatherConditionText.gravity = Gravity.CENTER
+        root.addView(weatherConditionText, lp(MID_X + 24f, CONTENT_Y + 342f, MID_W - 48f, 28f))
     }
 
     private fun updateDate() {
@@ -1172,55 +1195,76 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---- Viaje: ubicación y clima actuales ----
-
-    private fun buildTripCard() {
-        card(TRIP_X, CONTENT_Y, TRIP_W, CARD_H)
-        val x = TRIP_X + 16f
-        val w = TRIP_W - 32f
-
-        val head = LinearLayout(this)
-        head.orientation = LinearLayout.HORIZONTAL
-        head.gravity = Gravity.CENTER_VERTICAL
-        head.addView(
-            iconView(R.drawable.ic_nav, 28f, null, 0f, blue),
-            LinearLayout.LayoutParams(px(28f), px(28f)).apply { rightMargin = px(10f) }
-        )
-        head.addView(label("Viaje", 28f, Color.WHITE, true))
-        root.addView(head, lp(x, CONTENT_Y + 14f, w, 36f))
-
-        root.addView(label("Ubicación actual", 17f, textMuted), lp(x, CONTENT_Y + 62f, w, 22f))
-        locationText = label("", 21f, Color.WHITE, true)
-        locationText.maxLines = 2
-        root.addView(locationText, lp(x, CONTENT_Y + 86f, w, 56f))
-
-        val map = ImageView(this).apply {
-            setImageResource(R.drawable.static_trip_map)
-            scaleType = ImageView.ScaleType.CENTER_CROP
+    private fun buildCarConnectCard() {
+        carConnectCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = panelBg()
+            setPadding(px(22f), px(18f), px(22f), px(18f))
         }
-        roundClip(map, 0.07f)
-        root.addView(map, lp(x, CONTENT_Y + 150f, w, 124f))
-        val pin = iconView(R.drawable.ic_pin, 40f, null, 4f, lightBlue)
-        root.addView(pin, lp(x + (w - 40f) / 2f, CONTENT_Y + 150f + 30f, 40f, 40f))
+        carConnectCard.addView(label("CARPLAY  ·  ANDROID AUTO", 19f, textMuted, true).apply {
+            gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(MP, px(32f)))
 
-        root.addView(label("Clima actual", 17f, textMuted), lp(x, CONTENT_Y + 286f, w, 22f))
-        tripWeatherText = label("", 19f, Color.WHITE, true)
-        tripWeatherText.maxLines = 2
-        root.addView(tripWeatherText, lp(x, CONTENT_Y + 310f, w, 56f))
+        carConnectIcon = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            background = rounded(0xFF1C2A3D.toInt(), 28f)
+            setPadding(px(18f), px(18f), px(18f), px(18f))
+            setImageResource(R.drawable.ic_car)
+            setColorFilter(lightBlue)
+            contentDescription = "Icono de la aplicación de conexión del vehículo"
+        }
+        carConnectCard.addView(carConnectIcon,
+            LinearLayout.LayoutParams(px(148f), px(148f)).apply { topMargin = px(16f) })
+
+        carConnectTitle = label("ZLINK5 / CPLINK", 23f, Color.WHITE, true).apply {
+            gravity = Gravity.CENTER
+        }
+        carConnectCard.addView(carConnectTitle,
+            LinearLayout.LayoutParams(MP, px(38f)).apply { topMargin = px(12f) })
+        carConnectHint = label("Buscando app de conexión…", 15f, textMuted).apply {
+            gravity = Gravity.CENTER
+        }
+        carConnectCard.addView(carConnectHint, LinearLayout.LayoutParams(MP, px(28f)))
+
+        carConnectButton = TextView(this).apply {
+            text = "CONECTAR"
+            gravity = Gravity.CENTER
+            typeface = Typeface.DEFAULT_BOLD
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, 23f * ss)
+            setTextColor(Color.WHITE)
+            background = rounded(0xFF2F4A78.toInt(), 20f, lightBlue)
+            isClickable = true
+            setOnClickListener { openAndroidAuto() }
+        }
+        carConnectCard.addView(carConnectButton,
+            LinearLayout.LayoutParams(MP, px(64f)).apply { topMargin = px(12f) })
+        root.addView(carConnectCard, panelParams("connect", CONNECT_X, CONTENT_Y, CONNECT_W, CARD_H))
     }
 
-    private fun buildWeatherCard() {
-        card(MID_X, WEATHER_Y, MID_W, WEATHER_H)
-        weatherIcon = label("⛅", 56f, Color.WHITE, true).apply { gravity = Gravity.CENTER }
-        root.addView(weatherIcon, lp(MID_X + 14f, WEATHER_Y + 22f, 88f, 80f))
-
-        weatherValue = label("--°C", 44f, Color.WHITE, true)
-        weatherValue.gravity = Gravity.END or Gravity.CENTER_VERTICAL
-        root.addView(weatherValue, lp(MID_X + 106f, WEATHER_Y + 22f, MID_W - 106f - 16f, 80f))
-
-        weatherConditionText = label("Obteniendo clima…", 18f, Color.WHITE)
-        weatherConditionText.gravity = Gravity.CENTER
-        root.addView(weatherConditionText, lp(MID_X + 12f, WEATHER_Y + 124f, MID_W - 24f, 30f))
+    private fun updateCarConnectCard() {
+        if (!::carConnectIcon.isInitialized) return
+        val component = findCarIntegration()
+        if (component == null) {
+            carConnectIcon.setImageResource(R.drawable.ic_car)
+            carConnectIcon.setColorFilter(lightBlue)
+            carConnectTitle.text = "ZLINK5 / CPLINK"
+            carConnectHint.text = "No se encontró una app instalada"
+            carConnectButton.text = "BUSCAR CONEXIÓN"
+            return
+        }
+        try {
+            carConnectIcon.clearColorFilter()
+            carConnectIcon.setImageDrawable(packageManager.getApplicationIcon(component.packageName))
+            val info = packageManager.getApplicationInfo(component.packageName, 0)
+            carConnectTitle.text = packageManager.getApplicationLabel(info)
+        } catch (_: PackageManager.NameNotFoundException) {
+            carConnectIcon.setImageResource(R.drawable.ic_car)
+            carConnectIcon.setColorFilter(lightBlue)
+            carConnectTitle.text = "ZLINK / CPLINK"
+        }
+        carConnectHint.text = "Listo para conectar con el vehículo"
+        carConnectButton.text = "CONECTAR"
     }
 
     private fun weatherEmoji(condition: String): String {
@@ -1240,14 +1284,13 @@ class MainActivity : Activity() {
 
     private fun updateTripViews() {
         val gpsPlace = currentLocation?.let { "%.5f, %.5f".format(Locale.US, it.latitude, it.longitude) }
-        locationText.text = placeName ?: gpsPlace ?: "Buscando ubicación…"
+        locationText.text = placeName ?: gpsPlace ?: "Buscando ubicación GPS…"
         val weather = (weatherLabel ?: "--°C · Obteniendo clima…").split(" · ", limit = 2)
         val temperature = weather.firstOrNull() ?: "--°C"
         val condition = weather.getOrNull(1) ?: "Obteniendo clima…"
         weatherValue.text = temperature
         weatherConditionText.text = condition
         weatherIcon.text = weatherEmoji(condition)
-        tripWeatherText.text = "$temperature · $condition"
         if (selectedTab == "VIAJE") renderTabContent("VIAJE")
     }
 
@@ -1311,17 +1354,17 @@ class MainActivity : Activity() {
         recentDock.removeAllViews()
         val saved = prefs.getString("recent_packages", "")!!.split("|").filter { it.isNotBlank() }
         val launcherApps = appCatalog.loadLauncherApps().associateBy { it.component.packageName }
-        val zlinkPkg = findZlink()?.packageName
+        val carIntegrationPkg = findCarIntegration()?.packageName
         val recent = saved.distinct().mapNotNull { launcherApps[it] }
         val defaults = mutableListOf<InstalledApp>()
         launcherApps["com.spotify.music"]?.let { defaults.add(it) }
         launcherApps["com.google.android.youtube"]?.let { defaults.add(it) }
         defaultSmsPackage()?.let { launcherApps[it] }?.let { defaults.add(it) }
-        zlinkPkg?.let { launcherApps[it] }?.let { defaults.add(it) }
+        carIntegrationPkg?.let { launcherApps[it] }?.let { defaults.add(it) }
         val chosen = (recent.take(DOCK_SLOTS) + defaults)
             .distinctBy { it.component.packageName }
             .take(DOCK_SLOTS)
-            .map { if (it.component.packageName == zlinkPkg) it.copy(label = "Android Auto") else it }
+            .map { if (it.component.packageName == carIntegrationPkg) it.copy(label = "Android Auto") else it }
         if (chosen.isEmpty()) {
             val hint = label("Abre una app para fijarla aquí", 18f, textMuted)
             hint.gravity = Gravity.CENTER
@@ -1636,9 +1679,8 @@ class MainActivity : Activity() {
 
     private fun panelTitle(id: String): String = when (id) {
         "vehicle" -> "Vehículo y velocímetro"
-        "clock" -> "Reloj y fecha"
-        "weather" -> "Clima"
-        "trip" -> "Viaje y ubicación"
+        "clock" -> "Hora, fecha, ubicación y clima"
+        "connect" -> "Conexión del vehículo"
         "dock" -> "Accesos rápidos"
         "media" -> "Reproductor multimedia"
         "bottom" -> "Barra inferior"
@@ -1958,6 +2000,13 @@ class MainActivity : Activity() {
     private fun findPhoneBt(): ComponentName? = appCatalog.find(InstalledAppsCatalog.PHONE_BT_EXACT)
     private fun findZlink(): ComponentName? = appCatalog.find(InstalledAppsCatalog.ZLINK_EXACT, InstalledAppsCatalog.ZLINK_CONTAINS, "zlink")
 
+    /** Prioriza ZLINK5 y acepta otras versiones de ZLINK antes de probar CPLINK. */
+    private fun findCarIntegration(): ComponentName? = findZlink() ?: appCatalog.find(
+        exactNames = listOf("cplink", "cp link", "carplay link"),
+        partialNames = listOf("cplink", "cp link"),
+        packageNameContains = "cplink"
+    )
+
     private fun launchComponent(c: ComponentName): Boolean {
         val launched = startSafe(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(c))
         if (launched) rememberRecentPackage(c.packageName)
@@ -2013,11 +2062,11 @@ class MainActivity : Activity() {
         toast("No encontré la app BT. Elige una de la lista.")
     }
 
-    /** Android Auto: abre ZLINK5. */
+    /** Abre ZLINK (cualquier versión) o, si no existe, CPLINK. */
     private fun openAndroidAuto() {
-        findZlink()?.let { if (launchComponent(it)) return }
+        findCarIntegration()?.let { if (launchComponent(it)) return }
         openDrawer()
-        toast("No encontré la app ZLINK5. Elige una de la lista.")
+        toast("No encontré ZLINK ni CPLINK. Elige una app de conexión de la lista.")
     }
 
     /** Mapas: Google Maps y, si no está, cualquier app de mapas o navegación. */
