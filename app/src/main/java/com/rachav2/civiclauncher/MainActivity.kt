@@ -142,12 +142,21 @@ class MainActivity : Activity() {
     private lateinit var bottomBar: LinearLayout
     private lateinit var mediaCardView: LinearLayout
     private lateinit var mediaEditButton: TextView
-    private lateinit var tripPageLocation: TextView
-    private lateinit var tripPageDistance: TextView
-    private lateinit var tripPageRoute: TextView
-    private lateinit var tripPageSpeed: TextView
-    private lateinit var tripActionButton: TextView
     private lateinit var tripSpeedometer: SpeedometerView
+    private lateinit var tripLimitCard: View
+    private lateinit var tripLimitSign: TextView
+    private lateinit var tripLimitStatus: TextView
+    private lateinit var tripLimitSource: TextView
+    private lateinit var tripMaxText: TextView
+    private lateinit var tripPageLocation: TextView
+    private lateinit var tripPageCoords: TextView
+    private lateinit var tripPageWeather: TextView
+    private lateinit var tripStatusChip: TextView
+    private lateinit var tripFromText: TextView
+    private lateinit var tripToText: TextView
+    private lateinit var tripDistanceValue: TextView
+    private lateinit var tripTimeValue: TextView
+    private lateinit var tripActionButton: TextView
     private lateinit var weatherValue: TextView
     private var selectedTab = "HOME"
     private val tabs = mutableListOf("HOME", "VIAJE", "MULTIMEDIA", "AJUSTES COCHE")
@@ -179,6 +188,9 @@ class MainActivity : Activity() {
     private var movingGpsFixes = 0
     private var stationarySince = 0L
     private var overLimit = false
+    private var tripMaxSpeedKmh = 0
+    private var tripStartMs = 0L
+    private var tripEndMs = 0L
     private val fallbackSpeedLimitKmh = 90
 
     private val panelRegions = listOf(
@@ -224,6 +236,7 @@ class MainActivity : Activity() {
             if (uiReady) {
                 updateProgress()
                 updateDate()
+                if (selectedTab == "VIAJE") renderTabContent("VIAJE") // el cronómetro del recorrido
             }
             handler.postDelayed(this, 1000L)
         }
@@ -242,6 +255,10 @@ class MainActivity : Activity() {
             speedText.text = shown.toString()
             ring.setSpeed(shown)
             updateAutomaticTrip(location)
+            if (tripActive && shown > tripMaxSpeedKmh) {
+                tripMaxSpeedKmh = shown
+                prefs.edit().putInt("trip_max_kmh", shown).apply()
+            }
             maybeLookupSpeedLimit(location)
             updateSpeedWarning(shown)
             if (::tripSpeedometer.isInitialized) tripSpeedometer.setReading(shown, currentSpeedLimitKmh)
@@ -268,6 +285,9 @@ class MainActivity : Activity() {
         userName = prefs.getString("user_name", "") ?: ""
         tripActive = prefs.getBoolean("trip_active", false)
         tripDistanceMeters = prefs.getFloat("trip_distance_m", 0f)
+        tripMaxSpeedKmh = prefs.getInt("trip_max_kmh", 0)
+        tripStartMs = prefs.getLong("trip_start_ms", 0L)
+        tripEndMs = prefs.getLong("trip_end_ms", 0L)
         tripInfoRepository = TripInfoRepository(
             context = this,
             onPlaceUpdated = { value ->
@@ -424,6 +444,17 @@ class MainActivity : Activity() {
         gradientType = GradientDrawable.RADIAL_GRADIENT
         gradientRadius = px(38f).toFloat()
         colors = intArrayOf(0x472F8CFF, 0x002F8CFF)
+    }
+
+    /** Fondo rojizo de la tarjeta de límite cuando se supera la velocidad permitida. */
+    private fun alertPanelBg(): GradientDrawable {
+        val g = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(0xE63E1B24.toInt(), 0xE6240F15.toInt())
+        )
+        g.cornerRadius = 24f * ss
+        g.setStroke(max(2, px(2f)), 0xFFFF5A5A.toInt())
+        return g
     }
 
     /** Parámetros de una tarjeta que ya incluyen el desplazamiento guardado por el usuario. */
@@ -648,10 +679,11 @@ class MainActivity : Activity() {
 
     private fun showTabContent(tab: String) {
         editOverlay.removeAllViews()
-        if (tab == "MULTIMEDIA") {
+        if (tab == "MULTIMEDIA" || tab == "VIAJE") {
+            // Páginas con varias tarjetas propias: se dibujan directamente sobre el fondo.
             editOverlay.setBackgroundColor(Color.TRANSPARENT)
             editOverlay.isClickable = false
-            buildMultimediaPage()
+            if (tab == "MULTIMEDIA") buildMultimediaPage() else buildTripPage()
             editOverlay.visibility = View.VISIBLE
             return
         }
@@ -666,7 +698,6 @@ class MainActivity : Activity() {
         val heading = label(tab, 30f, Color.WHITE, true).apply { gravity = Gravity.CENTER }
         panel.addView(heading, LinearLayout.LayoutParams(MP, px(48f)))
         when (tab) {
-            "VIAJE" -> buildTripPage(panel)
             "MULTIMEDIA" -> Unit
             "AJUSTES COCHE" -> buildCarSettingsPage(panel)
             else -> buildGenericPage(panel, tab)
@@ -701,44 +732,105 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun buildTripPage(panel: LinearLayout) {
-        panel.addView(label("UBICACIÓN ACTUAL", 16f, textMuted, true), LinearLayout.LayoutParams(MP, px(24f)))
-        tripPageLocation = label("Buscando ubicación GPS…", 22f, Color.WHITE, true)
-        panel.addView(tripPageLocation, LinearLayout.LayoutParams(MP, px(36f)))
-        tripPageRoute = label("Desde: esperando GPS\nHasta: en recorrido", 18f, Color.WHITE)
-        tripPageRoute.maxLines = 2
-        panel.addView(tripPageRoute, LinearLayout.LayoutParams(MP, px(52f)))
-        tripPageDistance = label("RECORRIDO  ·  0.0 km", 18f, lightBlue, true)
-        panel.addView(tripPageDistance, LinearLayout.LayoutParams(MP, px(30f)))
-        val routeMap = FrameLayout(this)
-        val mapImage = ImageView(this).apply {
-            setImageResource(R.drawable.static_trip_map)
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            roundClip(this, 0.08f)
-            contentDescription = "Fondo de mapa estático en azul oscuro"
-        }
-        routeMap.addView(mapImage, FrameLayout.LayoutParams(MP, MP))
-        val mapCaption = label("MAPA ESTÁTICO  ·  RECORRIDO GPS", 11f, 0xFFD4E3FA.toInt(), true).apply {
-            gravity = Gravity.BOTTOM or Gravity.END
-            setPadding(0, 0, px(10f), px(6f))
-        }
-        routeMap.addView(mapCaption, FrameLayout.LayoutParams(MP, MP))
-        panel.addView(routeMap, LinearLayout.LayoutParams(MP, px(96f)))
+    private fun <T : View> place(view: T, l: Float, t: Float, w: Float, h: Float): T {
+        editOverlay.addView(view, lp(l, t, w, h))
+        return view
+    }
+
+    private fun pageCardBg(l: Float, t: Float, w: Float, h: Float): View =
+        place(View(this).apply { background = panelBg() }, l, t, w, h)
+
+    /**
+     * Pestaña VIAJE: cuatro tarjetas en cuadrícula 2x2.
+     * Velocímetro, límite de velocidad, ubicación actual y recorrido actual.
+     */
+    private fun buildTripPage() {
+        val leftX = VEHICLE_X
+        val rightX = 647f
+        val colW = 613f
+        val topY = CONTENT_Y
+        val botY = CONTENT_Y + 279f
+        val rowH = 265f
+
+        // 1) Velocímetro con tacómetro
+        pageCardBg(leftX, topY, colW, rowH)
+        place(label("VELOCÍMETRO", 16f, textMuted, true), leftX + 24f, topY + 16f, 300f, 24f)
         tripSpeedometer = SpeedometerView(this)
         tripSpeedometer.setReading(currentSpeedKmh, currentSpeedLimitKmh)
-        val gaugeCard = FrameLayout(this).apply { background = panelBg(18f) }
-        gaugeCard.addView(tripSpeedometer, FrameLayout.LayoutParams(MP, MP))
-        panel.addView(gaugeCard, LinearLayout.LayoutParams(MP, px(128f)))
-        tripPageSpeed = label("LÍMITE APROX.  ·  90 km/h", 16f, textMuted, true)
-        tripPageSpeed.setPadding(px(10f), 0, px(10f), 0)
-        panel.addView(tripPageSpeed, LinearLayout.LayoutParams(MP, px(28f)))
-        tripActionButton = TextView(this).apply {
+        place(tripSpeedometer, leftX + (colW - 440f) / 2f, topY + 38f, 440f, 220f)
+
+        // 2) Límite de velocidad (avisa cuando se excede)
+        tripLimitCard = pageCardBg(rightX, topY, colW, rowH)
+        place(label("LÍMITE DE VELOCIDAD", 16f, textMuted, true), rightX + 24f, topY + 16f, 400f, 24f)
+        tripLimitSign = TextView(this).apply {
             gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            background = rounded(0xFF304E81.toInt(), 20f)
-            setOnClickListener { toggleTrip() }
+            includeFontPadding = false
+            maxLines = 1
+            setTextColor(0xFF111111.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, 62f * ss)
+            typeface = Typeface.DEFAULT_BOLD
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.WHITE)
+                setStroke(px(13f), 0xFFE53935.toInt())
+            }
         }
-        panel.addView(tripActionButton, LinearLayout.LayoutParams(MP, px(48f)).apply { topMargin = px(5f) })
+        place(tripLimitSign, rightX + 36f, topY + 70f, 150f, 150f)
+        tripLimitStatus = place(label("", 26f, Color.WHITE, true), rightX + 214f, topY + 78f, colW - 236f, 40f)
+        tripLimitSource = place(label("", 17f, textMuted), rightX + 214f, topY + 124f, colW - 236f, 26f)
+        tripMaxText = place(label("", 21f, lightBlue, true), rightX + 214f, topY + 168f, colW - 236f, 32f)
+
+        // 3) Ubicación actual
+        pageCardBg(leftX, botY, colW, rowH)
+        place(label("UBICACIÓN ACTUAL", 16f, textMuted, true), leftX + 24f, botY + 16f, 300f, 24f)
+        tripPageLocation = place(label("Buscando ubicación GPS…", 26f, Color.WHITE, true).apply { maxLines = 3 },
+            leftX + 24f, botY + 52f, 290f, 108f)
+        tripPageCoords = place(label("", 16f, textMuted), leftX + 24f, botY + 168f, 290f, 22f)
+        tripPageWeather = place(label("", 19f, lightBlue, true), leftX + 24f, botY + 200f, 290f, 28f)
+        val map = ImageView(this).apply {
+            setImageResource(R.drawable.static_trip_map)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            contentDescription = "Mapa estático en azul oscuro"
+        }
+        roundClip(map, 0.06f)
+        place(map, leftX + 336f, botY + 24f, 253f, 217f)
+        place(iconView(R.drawable.ic_pin, 52f, null, 4f, lightBlue),
+            leftX + 336f + (253f - 52f) / 2f, botY + 24f + (217f - 52f) / 2f - 10f, 52f, 52f)
+
+        // 4) Recorrido actual, todo en una sola tarjeta
+        pageCardBg(rightX, botY, colW, rowH)
+        place(label("RECORRIDO ACTUAL", 16f, textMuted, true), rightX + 24f, botY + 16f, 300f, 24f)
+        tripStatusChip = place(TextView(this).apply {
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            maxLines = 1
+            typeface = Typeface.DEFAULT_BOLD
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, 14f * ss)
+        }, rightX + colW - 24f - 150f, botY + 14f, 150f, 28f)
+
+        place(label("●  DESDE", 14f, lightBlue, true), rightX + 24f, botY + 58f, 290f, 20f)
+        tripFromText = place(label("—", 20f, Color.WHITE, true), rightX + 24f, botY + 80f, 290f, 28f)
+        place(label("●  HASTA", 14f, 0xFFFFC857.toInt(), true), rightX + 24f, botY + 122f, 290f, 20f)
+        tripToText = place(label("—", 20f, Color.WHITE, true), rightX + 24f, botY + 144f, 290f, 28f)
+
+        place(View(this).apply { setBackgroundColor(0x26FFFFFF) }, rightX + 326f, botY + 60f, 1.5f, 118f)
+
+        place(label("DISTANCIA", 14f, textMuted, true), rightX + 350f, botY + 58f, 240f, 20f)
+        tripDistanceValue = place(label("0.0 km", 40f, Color.WHITE, true), rightX + 350f, botY + 78f, 240f, 50f)
+        place(label("TIEMPO", 14f, textMuted, true), rightX + 350f, botY + 132f, 240f, 20f)
+        tripTimeValue = place(label("--:--", 36f, lightBlue, true), rightX + 350f, botY + 152f, 240f, 46f)
+
+        tripActionButton = place(TextView(this).apply {
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            setTextColor(Color.WHITE)
+            typeface = Typeface.DEFAULT_BOLD
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, 19f * ss)
+            background = rounded(0xFF2F4A78.toInt(), 18f, strokeColor)
+            isClickable = true
+            setOnClickListener { toggleTrip() }
+        }, rightX + 24f, botY + 208f, colW - 48f, 44f)
+
         renderTabContent("VIAJE")
     }
 
@@ -866,21 +958,52 @@ class MainActivity : Activity() {
         panel.addView(label("Sección: $tab", 20f, textMuted), LinearLayout.LayoutParams(MP, px(44f)))
     }
 
+    private fun tripDurationText(): String {
+        if (tripStartMs <= 0L) return "--:--"
+        val end = if (tripActive) System.currentTimeMillis() else tripEndMs
+        if (end < tripStartMs) return "--:--"
+        val total = (end - tripStartMs) / 1000L
+        val h = total / 3600L
+        val m = (total % 3600L) / 60L
+        val s = total % 60L
+        return if (h > 0L) "%d:%02d:%02d".format(Locale.US, h, m, s) else "%02d:%02d".format(Locale.US, m, s)
+    }
+
     private fun renderTabContent(tab: String) {
-        if (tab == "VIAJE" && ::tripPageLocation.isInitialized) {
-            tripPageLocation.text = placeName ?: currentLocation?.let { "%.5f, %.5f".format(Locale.US, it.latitude, it.longitude) } ?: "Buscando ubicación GPS…"
-            val from = prefs.getString("trip_start_place", null) ?: "—"
-            val to = when { tripActive -> "En curso · ${placeName ?: "ubicación GPS"}"; prefs.getString("trip_end_place", null) != null -> prefs.getString("trip_end_place", null)!!; else -> "—" }
-            tripPageRoute.text = "Desde: $from\nHasta: $to"
-            tripPageDistance.text = "RECORRIDO  ·  ${"%.1f".format(Locale.US, tripDistanceMeters / 1000f)} km"
-            val over = currentSpeedKmh > currentSpeedLimitKmh
-            tripPageSpeed.text = if (over) "⚠ EXCESO DE VELOCIDAD  ·  LÍMITE $currentSpeedLimitKmh km/h" else
-                "LÍMITE APROX.  ·  $currentSpeedLimitKmh km/h  ·  ${if (speedLimitFromMap) "© OpenStreetMap contributors" else "Referencia SV"}"
-            tripPageSpeed.setTextColor(if (over) 0xFFFF6868.toInt() else textMuted)
-            tripPageSpeed.background = rounded(if (over) 0x663D101A else Color.TRANSPARENT, 12f)
-            if (::tripSpeedometer.isInitialized) tripSpeedometer.setReading(currentSpeedKmh, currentSpeedLimitKmh)
-            tripActionButton.text = if (tripActive) "FINALIZAR RECORRIDO" else "ESPERANDO MOVIMIENTO GPS"
+        if (tab != "VIAJE" || !::tripPageLocation.isInitialized) return
+
+        // Velocímetro y límite de velocidad
+        val over = currentSpeedKmh > currentSpeedLimitKmh
+        if (::tripSpeedometer.isInitialized) tripSpeedometer.setReading(currentSpeedKmh, currentSpeedLimitKmh)
+        tripLimitSign.text = currentSpeedLimitKmh.toString()
+        tripLimitCard.background = if (over) alertPanelBg() else panelBg()
+        tripLimitStatus.text = if (over) "⚠ Exceso de velocidad" else "Dentro del límite"
+        tripLimitStatus.setTextColor(if (over) 0xFFFF6868.toInt() else 0xFF7BE0A8.toInt())
+        tripLimitSource.text = if (speedLimitFromMap) "Dato del mapa · © OpenStreetMap" else "Límite de referencia"
+        tripMaxText.text = "Máx. del recorrido  ·  $tripMaxSpeedKmh km/h"
+
+        // Ubicación actual
+        val gps = currentLocation
+        tripPageLocation.text = placeName
+            ?: gps?.let { "%.5f, %.5f".format(Locale.US, it.latitude, it.longitude) }
+            ?: "Buscando ubicación GPS…"
+        tripPageCoords.text = gps?.let { "GPS  %.5f, %.5f".format(Locale.US, it.latitude, it.longitude) }
+            ?: "Esperando señal GPS…"
+        val weather = (weatherLabel ?: "--°C · Obteniendo clima…").split(" · ", limit = 2)
+        tripPageWeather.text = "${weatherEmoji(weather.getOrNull(1) ?: "")}  ${weather.joinToString(" · ")}"
+
+        // Recorrido actual
+        tripStatusChip.text = if (tripActive) "●  EN CURSO" else "EN ESPERA"
+        tripStatusChip.setTextColor(if (tripActive) 0xFF7BE0A8.toInt() else textMuted)
+        tripStatusChip.background = rounded(if (tripActive) 0x3328C76F else 0x22FFFFFF, 14f)
+        tripFromText.text = prefs.getString("trip_start_place", null) ?: "—"
+        tripToText.text = when {
+            tripActive -> "En curso · ${placeName ?: "ubicación GPS"}"
+            else -> prefs.getString("trip_end_place", null) ?: "—"
         }
+        tripDistanceValue.text = "${"%.1f".format(Locale.US, tripDistanceMeters / 1000f)} km"
+        tripTimeValue.text = tripDurationText()
+        tripActionButton.text = if (tripActive) "FINALIZAR RECORRIDO" else "ESPERANDO MOVIMIENTO GPS"
     }
 
     private fun toggleTrip() {
@@ -901,7 +1024,11 @@ class MainActivity : Activity() {
         tripLastPoint = Location(location)
         stationarySince = 0L
         val start = placeName ?: locationLabel(location)
+        tripMaxSpeedKmh = 0
+        tripStartMs = System.currentTimeMillis()
+        tripEndMs = 0L
         prefs.edit().putBoolean("trip_active", true).putFloat("trip_distance_m", 0f)
+            .putInt("trip_max_kmh", 0).putLong("trip_start_ms", tripStartMs).putLong("trip_end_ms", 0L)
             .putString("trip_start_place", start).remove("trip_end_place").apply()
         renderTabContent("VIAJE")
     }
@@ -912,7 +1039,9 @@ class MainActivity : Activity() {
         movingGpsFixes = 0
         stationarySince = 0L
         val end = placeName ?: location?.let { locationLabel(it) } ?: "Ubicación GPS actual"
+        tripEndMs = System.currentTimeMillis()
         prefs.edit().putBoolean("trip_active", false).putString("trip_end_place", end)
+            .putLong("trip_end_ms", tripEndMs)
             .putFloat("trip_distance_m", tripDistanceMeters).apply()
         renderTabContent("VIAJE")
     }

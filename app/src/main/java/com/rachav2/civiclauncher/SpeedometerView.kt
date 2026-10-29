@@ -16,6 +16,7 @@ internal class SpeedometerView(context: Context) : View(context) {
     private val limitMarker = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
     private val number = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD }
     private val caption = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD }
+    private val tickText = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD }
     private val arc = RectF()
     private var speedKmh = 0
     private var limitKmh = 90
@@ -70,6 +71,16 @@ internal class SpeedometerView(context: Context) : View(context) {
                 cx + (kotlin.math.cos(angle) * rOuterX).toFloat(), centerY + (kotlin.math.sin(angle) * rOuterY).toFloat(),
                 cx + (kotlin.math.cos(angle) * rInnerX).toFloat(), centerY + (kotlin.math.sin(angle) * rInnerY).toFloat(), ticks
             )
+        }
+
+        // Cifras del tacómetro (0 a la velocidad máxima de la escala) dentro del arco.
+        tickText.color = 0xFF8FA6C9.toInt()
+        tickText.textSize = height * 0.075f
+        for (i in 0..6) {
+            val angle = Math.toRadians((180 + i * 30).toDouble())
+            val lx = width / 2f + (kotlin.math.cos(angle) * (radiusX - stroke * 2.3f)).toFloat()
+            val ly = centerY + (kotlin.math.sin(angle) * (radiusY - stroke * 2.3f)).toFloat()
+            canvas.drawText((maxDisplay * i / 6).toString(), lx, ly + tickText.textSize * 0.35f, tickText)
         }
 
         number.color = if (speedKmh > limitKmh) 0xFFFF6666.toInt() else 0xFFFFFFFF.toInt()
