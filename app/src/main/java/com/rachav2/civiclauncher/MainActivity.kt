@@ -15,6 +15,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -62,6 +63,30 @@ import kotlin.math.roundToInt
 private const val MP = ViewGroup.LayoutParams.MATCH_PARENT
 private const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
 
+// Rejilla base de 1280x720: todo se calcula a partir de estas medidas para que nada se superponga.
+private const val TABS_Y = 12f
+private const val TABS_H = 52f
+private const val CONTENT_Y = 78f
+private const val CARD_H = 380f
+private const val CLOCK_H = 180f
+private const val WEATHER_Y = 272f
+private const val WEATHER_H = 186f
+private const val DOCK_Y = 472f
+private const val DOCK_H = 150f
+private const val DOCK_W = 862f
+private const val BAR_Y = 636f
+private const val BAR_H = 68f
+private const val VEHICLE_X = 20f
+private const val VEHICLE_W = 345f
+private const val MID_X = 379f
+private const val MID_W = 238f
+private const val TRIP_X = 631f
+private const val TRIP_W = 251f
+private const val MEDIA_X = 896f
+private const val MEDIA_W = 364f
+private const val MEDIA_H = 544f
+private const val DOCK_SLOTS = 4
+
 private data class PanelRegion(val id: String, val left: Float, val top: Float, val width: Float, val height: Float)
 
 /**
@@ -75,8 +100,8 @@ class MainActivity : Activity() {
     // ---- Paleta ----
     private val blue = 0xFF2F8CFF.toInt()
     private val lightBlue = 0xFF6CB4FF.toInt()
-    private val textMuted = 0xFF8FA6C9.toInt()
-    private val strokeColor = 0xFF1E3A66.toInt()
+    private val textMuted = 0xFF9AA9BF.toInt()
+    private val strokeColor = 0xFF3A4658.toInt()
 
     // ---- Escala ----
     private var sx = 1f
@@ -96,8 +121,9 @@ class MainActivity : Activity() {
     private lateinit var ring: SpeedRingView
     private lateinit var speedText: TextView
     private lateinit var greetingText: TextView
-    private lateinit var homeLocationText: TextView
     private lateinit var weatherConditionText: TextView
+    private lateinit var weatherIcon: TextView
+    private lateinit var tripWeatherText: TextView
     private lateinit var dateText: TextView
     private lateinit var locationText: TextView
     private lateinit var artView: ImageView
@@ -105,10 +131,6 @@ class MainActivity : Activity() {
     private lateinit var artistText: TextView
     private lateinit var progressBar: ProgressBar
     private lateinit var playBtn: ImageView
-    private lateinit var dockSpotify: ImageView
-    private lateinit var dockYoutube: ImageView
-    private lateinit var dockMessages: ImageView
-    private lateinit var dockAuto: ImageView
     private lateinit var nightBtn: ImageView
     private lateinit var nightOverlay: View
     private lateinit var blackout: View
@@ -127,9 +149,6 @@ class MainActivity : Activity() {
     private lateinit var tripActionButton: TextView
     private lateinit var tripSpeedometer: SpeedometerView
     private lateinit var weatherValue: TextView
-    private val speedViews = mutableSetOf<View>()
-    private val homeOnlyViews = mutableSetOf<View>()
-    private val multimediaViews = mutableSetOf<View>()
     private var selectedTab = "HOME"
     private val tabs = mutableListOf("HOME", "VIAJE", "MULTIMEDIA", "AJUSTES COCHE")
     private val homeViews = mutableListOf<View>()
@@ -163,13 +182,13 @@ class MainActivity : Activity() {
     private val fallbackSpeedLimitKmh = 90
 
     private val panelRegions = listOf(
-        PanelRegion("vehicle", 30f, 145f, 650f, 430f),
-        PanelRegion("clock", 970f, 70f, 290f, 75f),
-        PanelRegion("weather", 710f, 145f, 550f, 430f),
-        PanelRegion("trip", 670f, 70f, 260f, 340f),
-        PanelRegion("dock", 20f, 430f, 910f, 130f),
-        PanelRegion("media", 950f, 70f, 310f, 490f),
-        PanelRegion("bottom", 20f, 590f, 1240f, 68f)
+        PanelRegion("vehicle", VEHICLE_X, CONTENT_Y, VEHICLE_W, CARD_H),
+        PanelRegion("clock", MID_X, CONTENT_Y, MID_W, CLOCK_H),
+        PanelRegion("weather", MID_X, WEATHER_Y, MID_W, WEATHER_H),
+        PanelRegion("trip", TRIP_X, CONTENT_Y, TRIP_W, CARD_H),
+        PanelRegion("dock", VEHICLE_X, DOCK_Y, DOCK_W, DOCK_H),
+        PanelRegion("media", MEDIA_X, CONTENT_Y, MEDIA_W, MEDIA_H),
+        PanelRegion("bottom", 20f, BAR_Y, 1240f, BAR_H)
     )
 
     // ---- Ubicación y clima ----
@@ -242,6 +261,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("civic", Context.MODE_PRIVATE)
+        migrateLayoutPrefs()
         nightMode = prefs.getBoolean("night", false)
         placeName = prefs.getString("place", null)
         weatherLabel = prefs.getString("weather", null)
@@ -265,7 +285,7 @@ class MainActivity : Activity() {
         root = FrameLayout(this)
         root.background = GradientDrawable(
             GradientDrawable.Orientation.TL_BR,
-            intArrayOf(0xFF02060E.toInt(), 0xFF0A1B3A.toInt(), 0xFF030A16.toInt())
+            intArrayOf(0xFF05090F.toInt(), 0xFF0F1E2E.toInt(), 0xFF070D14.toInt())
         )
         setContentView(root)
 
@@ -338,6 +358,14 @@ class MainActivity : Activity() {
         startGps()
     }
 
+    /** El diseño cambió de posiciones: se descartan los desplazamientos guardados del diseño anterior. */
+    private fun migrateLayoutPrefs() {
+        if (prefs.getInt("layout_version", 0) >= LAYOUT_VERSION) return
+        val editor = prefs.edit()
+        prefs.all.keys.filter { it.startsWith("panel.") }.forEach { editor.remove(it) }
+        editor.putInt("layout_version", LAYOUT_VERSION).apply()
+    }
+
     @Suppress("DEPRECATION")
     private fun hideSystemUi() {
         if (Build.VERSION.SDK_INT >= 30) {
@@ -380,14 +408,35 @@ class MainActivity : Activity() {
             if (stroke != 0) setStroke(max(1, px(1.5f)), stroke)
         }
 
-    private fun panelBg(radius: Float = 28f): GradientDrawable {
-        val g = GradientDrawable(
-            GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(0xCC12294F.toInt(), 0xCC081528.toInt())
-        )
+    private fun panelBg(
+        radius: Float = 24f,
+        top: Int = 0xE62C343E.toInt(),
+        bottom: Int = 0xE61B2129.toInt()
+    ): GradientDrawable {
+        val g = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(top, bottom))
         g.cornerRadius = radius * ss
         g.setStroke(max(1, px(1.5f)), strokeColor)
         return g
+    }
+
+    /** Resplandor azul suave detrás de los iconos de la barra inferior. */
+    private fun glow(): GradientDrawable = GradientDrawable().apply {
+        gradientType = GradientDrawable.RADIAL_GRADIENT
+        gradientRadius = px(38f).toFloat()
+        colors = intArrayOf(0x472F8CFF, 0x002F8CFF)
+    }
+
+    /** Parámetros de una tarjeta que ya incluyen el desplazamiento guardado por el usuario. */
+    private fun panelParams(id: String, l: Float, t: Float, w: Float, h: Float): FrameLayout.LayoutParams =
+        lp(l, t, w, h).apply {
+            leftMargin += xx(prefs.getFloat("panel.$id.x", 0f))
+            topMargin += yy(prefs.getFloat("panel.$id.y", 0f))
+        }
+
+    /** Las capas de noche y de pantalla apagada siempre van por encima de todo lo demás. */
+    private fun restackOverlays() {
+        if (::nightOverlay.isInitialized) nightOverlay.bringToFront()
+        if (::blackout.isInitialized) blackout.bringToFront()
     }
 
     private fun card(l: Float, t: Float, w: Float, h: Float): View {
@@ -443,9 +492,6 @@ class MainActivity : Activity() {
 
     private fun buildUi() {
         root.removeAllViews()
-        speedViews.clear()
-        homeOnlyViews.clear()
-        multimediaViews.clear()
         sx = uiW / 1280f
         sy = uiH / 720f
         ss = min(sx, sy)
@@ -462,7 +508,6 @@ class MainActivity : Activity() {
         configureMovablePanels()
         buildOverlays()
         buildEditOverlay()
-        homeOnlyViews.addAll(speedViews)
         homeViews.clear()
         for (i in 0 until root.childCount) {
             val view = root.getChildAt(i)
@@ -470,6 +515,7 @@ class MainActivity : Activity() {
                 view !== nightOverlay && view !== blackout) homeViews.add(view)
         }
         showSelectedTab()
+        restackOverlays()
 
         uiReady = true
         showIdle()
@@ -488,67 +534,103 @@ class MainActivity : Activity() {
     // ---- Tarjeta del vehículo (velocímetro) ----
 
     private fun buildVehicleCard() {
-        speedViews.add(card(30f, 145f, 650f, 430f))
+        card(VEHICLE_X, CONTENT_Y, VEHICLE_W, CARD_H)
 
-        greetingText = label(greeting(), 34f, Color.WHITE, true)
-        root.addView(greetingText, lp(40f, 76f, 760f, 52f))
-        speedViews.add(greetingText)
+        val head = LinearLayout(this)
+        head.orientation = LinearLayout.HORIZONTAL
+        head.gravity = Gravity.CENTER_VERTICAL
+        head.addView(
+            iconView(R.drawable.ic_car, 28f, null, 0f, lightBlue),
+            LinearLayout.LayoutParams(px(28f), px(28f)).apply { rightMargin = px(10f) }
+        )
+        greetingText = label(greeting(), 24f, lightBlue, true)
+        head.addView(greetingText, LinearLayout.LayoutParams(0, WC, 1f))
+        root.addView(head, lp(VEHICLE_X + 20f, CONTENT_Y + 14f, VEHICLE_W - 40f, 36f))
 
-        ring = SpeedRingView(this, 13f * ss)
-        root.addView(ring, lp(240f, 168f, 230f, 230f))
+        // El velocímetro queda por encima de la foto: nunca se montan.
+        val ringSize = 160f
+        val ringX = VEHICLE_X + (VEHICLE_W - ringSize) / 2f
+        ring = SpeedRingView(this, 11f * ss)
+        root.addView(ring, lp(ringX, 134f, ringSize, ringSize))
 
-        speedText = label("0", 92f, Color.WHITE, true)
+        speedText = label("0", 60f, Color.WHITE, true)
         speedText.gravity = Gravity.CENTER
-        root.addView(speedText, lp(240f, 226f, 230f, 88f))
+        root.addView(speedText, lp(ringX, 166f, ringSize, 66f))
 
-        val unit = label("km/h", 28f, textMuted)
+        val unit = label("km/h", 20f, textMuted)
         unit.gravity = Gravity.CENTER
-        root.addView(unit, lp(240f, 311f, 230f, 34f))
-        speedViews.add(ring)
-        speedViews.add(speedText)
-        speedViews.add(unit)
+        root.addView(unit, lp(ringX, 232f, ringSize, 26f))
 
         val car = ImageView(this)
         car.setImageResource(R.drawable.car)
         car.scaleType = ImageView.ScaleType.FIT_CENTER
-        root.addView(car, lp(45f, 382f, 620f, 164f))
-        speedViews.add(car)
+        root.addView(car, lp(VEHICLE_X + 12f, 304f, VEHICLE_W - 24f, 148f))
     }
 
-    private fun greeting(): String = if (userName.isBlank()) "Hola, bienvenido" else "Hola, bienvenido, $userName"
+    private fun greeting(): String = if (userName.isBlank()) "Civic 2012" else "Hola, $userName"
+
+    private fun tabsParams(): FrameLayout.LayoutParams = lp(20f, TABS_Y, 1240f, TABS_H)
+
+    /** Línea fina bajo toda la barra de pestañas, como en el diseño de referencia. */
+    private fun tabsBarBackground(): Drawable {
+        val line = ColorDrawable(0x40FFFFFF)
+        return LayerDrawable(arrayOf<Drawable>(line)).apply {
+            setLayerInset(0, 0, yy(TABS_H) - max(1, px(1.5f)), 0, 0)
+        }
+    }
+
+    /** Pestaña activa: panel con esquinas superiores redondeadas y subrayado azul. */
+    private fun activeTabBackground(): Drawable {
+        val r = 16f * ss
+        val panel = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(0xFF3C4651.toInt(), 0xFF2B333C.toInt())
+        ).apply { cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f) }
+        val underline = ColorDrawable(lightBlue)
+        return LayerDrawable(arrayOf<Drawable>(panel, underline)).apply {
+            setLayerInset(1, 0, yy(TABS_H) - max(3, px(3f)), 0, 0)
+        }
+    }
+
+    private fun tabDivider(): View = View(this).apply { setBackgroundColor(0x33FFFFFF) }
 
     private fun buildTabs() {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            background = panelBg(18f)
+            background = tabsBarBackground()
         }
         tabsBar = bar
-        for (tab in tabs) {
+        tabs.forEachIndexed { index, tab ->
+            if (index > 0) bar.addView(tabDivider(), LinearLayout.LayoutParams(max(1, px(1.5f)), px(30f)))
+            val isCurrent = tab == selectedTab
             val button = TextView(this).apply {
                 text = tab
                 gravity = Gravity.CENTER
-                setTextSize(TypedValue.COMPLEX_UNIT_PX, 22f * ss)
-                setTextColor(if (tab == selectedTab) Color.WHITE else textMuted)
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, 24f * ss)
+                setTextColor(if (isCurrent) Color.WHITE else textMuted)
                 typeface = Typeface.DEFAULT_BOLD
+                maxLines = 1
                 isClickable = true
                 setOnClickListener { selectTab(tab) }
-                if (tab == selectedTab) background = rounded(0x553D5F9D, 14f, lightBlue)
+                if (isCurrent) background = activeTabBackground()
             }
             bar.addView(button, LinearLayout.LayoutParams(0, MP, 1f))
         }
+        bar.addView(tabDivider(), LinearLayout.LayoutParams(max(1, px(1.5f)), px(30f)))
         val add = TextView(this).apply {
             text = "+"
             gravity = Gravity.CENTER
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, 38f * ss)
-            setTextColor(lightBlue)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, 42f * ss)
+            setTextColor(0xFFC9D3E3.toInt())
+            isClickable = true
             setOnClickListener {
                 if (selectedTab == "HOME") showManager()
                 else showManagerDialog()
             }
         }
         bar.addView(add, LinearLayout.LayoutParams(px(76f), MP))
-        root.addView(bar, lp(20f, 10f, 1240f, 50f))
+        root.addView(bar, tabsParams())
     }
 
     private fun selectTab(tab: String) {
@@ -558,9 +640,10 @@ class MainActivity : Activity() {
         root.removeView(tabsBar)
         buildTabs()
         root.removeView(tabsBar)
-        root.addView(tabsBar, index, lp(20f, 10f, 1240f, 50f))
+        root.addView(tabsBar, index, tabsParams())
         bottomBar.bringToFront()
         tabsBar.bringToFront()
+        restackOverlays()
     }
 
     private fun showTabContent(tab: String) {
@@ -588,26 +671,33 @@ class MainActivity : Activity() {
             "AJUSTES COCHE" -> buildCarSettingsPage(panel)
             else -> buildGenericPage(panel, tab)
         }
-        editOverlay.addView(panel, lp(300f, 70f, 680f, 510f))
+        editOverlay.addView(panel, lp(240f, CONTENT_Y, 800f, MEDIA_H))
         editOverlay.visibility = View.VISIBLE
     }
 
     private fun showSelectedTab() {
         editOverlay.visibility = View.GONE
-        homeViews.forEach { it.visibility = View.GONE }
         if (selectedTab == "HOME") {
-            homeOnlyViews.forEach { it.visibility = View.VISIBLE }
-            mediaCardView.visibility = View.VISIBLE
-            mediaEditButton.visibility = View.VISIBLE
-            mediaCardView.layoutParams = lp(950f, 70f, 310f, 490f)
+            homeViews.forEach { it.visibility = View.VISIBLE }
+            mediaCardView.layoutParams = panelParams("media", MEDIA_X, CONTENT_Y, MEDIA_W, MEDIA_H)
+            applyPanelVisibility()
         } else {
-            multimediaViews.forEach { it.visibility = View.GONE }
+            homeViews.forEach { it.visibility = View.GONE }
             if (selectedTab == "MULTIMEDIA") {
+                mediaCardView.layoutParams = lp(VEHICLE_X, CONTENT_Y, 570f, MEDIA_H)
                 mediaCardView.visibility = View.VISIBLE
                 mediaEditButton.visibility = View.GONE
-                mediaCardView.layoutParams = lp(35f, 75f, 555f, 490f)
             }
             showTabContent(selectedTab)
+        }
+    }
+
+    /** Vuelve a ocultar los paneles que el usuario decidió esconder. */
+    private fun applyPanelVisibility() {
+        for (region in panelRegions) {
+            if (prefs.getBoolean("panel.${region.id}.hidden", false)) {
+                root.childrenForPanel(region.id).forEach { it.visibility = View.GONE }
+            }
         }
     }
 
@@ -633,12 +723,12 @@ class MainActivity : Activity() {
             setPadding(0, 0, px(10f), px(6f))
         }
         routeMap.addView(mapCaption, FrameLayout.LayoutParams(MP, MP))
-        panel.addView(routeMap, LinearLayout.LayoutParams(MP, px(78f)))
+        panel.addView(routeMap, LinearLayout.LayoutParams(MP, px(96f)))
         tripSpeedometer = SpeedometerView(this)
         tripSpeedometer.setReading(currentSpeedKmh, currentSpeedLimitKmh)
         val gaugeCard = FrameLayout(this).apply { background = panelBg(18f) }
         gaugeCard.addView(tripSpeedometer, FrameLayout.LayoutParams(MP, MP))
-        panel.addView(gaugeCard, LinearLayout.LayoutParams(MP, px(120f)))
+        panel.addView(gaugeCard, LinearLayout.LayoutParams(MP, px(128f)))
         tripPageSpeed = label("LÍMITE APROX.  ·  90 km/h", 16f, textMuted, true)
         tripPageSpeed.setPadding(px(10f), 0, px(10f), 0)
         panel.addView(tripPageSpeed, LinearLayout.LayoutParams(MP, px(28f)))
@@ -656,32 +746,34 @@ class MainActivity : Activity() {
         val radioCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            background = panelBg(22f)
+            background = panelBg()
             setPadding(px(22f), px(16f), px(22f), px(16f))
         }
-        radioCard.addView(label("RADIO FM", 22f, Color.WHITE, true),
-            LinearLayout.LayoutParams(MP, px(36f)))
-        radioCard.addView(label("Sintoniza desde la app de radio del vehículo", 16f, textMuted).apply {
+        radioCard.addView(label("RADIO FM", 24f, Color.WHITE, true).apply { gravity = Gravity.CENTER },
+            LinearLayout.LayoutParams(MP, px(38f)))
+        radioCard.addView(label("Sintoniza desde la app de radio del vehículo", 17f, textMuted).apply {
             gravity = Gravity.CENTER
-        }, LinearLayout.LayoutParams(MP, px(42f)))
+        }, LinearLayout.LayoutParams(MP, px(40f)))
         val radioButton = TextView(this).apply {
             text = "ABRIR RADIO"
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, 19f * ss)
-            background = rounded(0xFF263E68.toInt(), 16f, strokeColor)
+            typeface = Typeface.DEFAULT_BOLD
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, 20f * ss)
+            background = rounded(0xFF2F4A78.toInt(), 18f, strokeColor)
+            isClickable = true
             setOnClickListener { openRadio() }
         }
-        radioCard.addView(radioButton, LinearLayout.LayoutParams(MP, px(52f)))
-        editOverlay.addView(radioCard, lp(620f, 82f, 310f, 160f))
+        radioCard.addView(radioButton, LinearLayout.LayoutParams(MP, px(56f)))
+        editOverlay.addView(radioCard, lp(604f, CONTENT_Y, 656f, 190f))
 
         val appsCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = panelBg(22f)
+            background = panelBg()
             setPadding(px(18f), px(14f), px(18f), px(14f))
         }
-        appsCard.addView(label("APPS MULTIMEDIA", 19f, textMuted, true),
-            LinearLayout.LayoutParams(MP, px(30f)))
+        appsCard.addView(label("APPS MULTIMEDIA", 20f, textMuted, true),
+            LinearLayout.LayoutParams(MP, px(32f)))
         val appRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -692,10 +784,11 @@ class MainActivity : Activity() {
                 app.label.contains(key, ignoreCase = true) || app.component.packageName.contains(key, ignoreCase = true)
             } }
             .distinctBy { it.component.packageName }
-            .take(5)
+            .take(6)
         if (mediaApps.isEmpty()) {
-            appRow.addView(label("No se encontraron apps multimedia instaladas", 16f, textMuted),
-                LinearLayout.LayoutParams(MP, MP))
+            appRow.addView(label("No se encontraron apps multimedia instaladas", 17f, textMuted).apply {
+                gravity = Gravity.CENTER
+            }, LinearLayout.LayoutParams(MP, MP))
         } else {
             mediaApps.forEach { app ->
                 val cell = LinearLayout(this).apply {
@@ -709,14 +802,15 @@ class MainActivity : Activity() {
                     setImageDrawable(app.icon)
                     scaleType = ImageView.ScaleType.FIT_CENTER
                 }
-                cell.addView(icon, LinearLayout.LayoutParams(px(64f), px(64f)))
-                cell.addView(label(app.label, 14f, Color.WHITE).apply { gravity = Gravity.CENTER },
-                    LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(6f) })
+                roundClip(icon, 0.22f)
+                cell.addView(icon, LinearLayout.LayoutParams(px(72f), px(72f)))
+                cell.addView(label(app.label, 16f, Color.WHITE).apply { gravity = Gravity.CENTER },
+                    LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(8f) })
                 appRow.addView(cell, LinearLayout.LayoutParams(0, MP, 1f))
             }
         }
         appsCard.addView(appRow, LinearLayout.LayoutParams(MP, 0, 1f))
-        editOverlay.addView(appsCard, lp(620f, 270f, 590f, 220f))
+        editOverlay.addView(appsCard, lp(604f, CONTENT_Y + 204f, 656f, 340f))
     }
 
     private fun togglePlayback() {
@@ -904,12 +998,13 @@ class MainActivity : Activity() {
         tabsBar.bringToFront()
         bottomBar.bringToFront()
         tabsBar.bringToFront()
+        restackOverlays()
     }
 
     // ---- Reloj ----
 
     private fun buildClockCard() {
-        homeOnlyViews.add(card(970f, 70f, 290f, 75f))
+        card(MID_X, CONTENT_Y, MID_W, CLOCK_H)
 
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
@@ -918,13 +1013,13 @@ class MainActivity : Activity() {
         val time = TextClock(this)
         time.format12Hour = "h:mm"
         time.format24Hour = "HH:mm"
-        styleClock(time, 44f, Color.WHITE, true)
+        styleClock(time, 56f, Color.WHITE, true)
         row.addView(time)
 
         val ampm = TextClock(this)
         ampm.format12Hour = "a"
         ampm.format24Hour = " "
-        styleClock(ampm, 18f, textMuted, false)
+        styleClock(ampm, 20f, textMuted, false)
         row.addView(
             ampm,
             LinearLayout.LayoutParams(WC, WC).apply {
@@ -932,16 +1027,15 @@ class MainActivity : Activity() {
                 bottomMargin = px(8f)
             }
         )
-        root.addView(row, lp(990f, 72f, 245f, 46f))
-        homeOnlyViews.add(row)
+        root.addView(row, lp(MID_X + 18f, CONTENT_Y + 24f, MID_W - 36f, 72f))
 
-        dateText = label("", 16f, textMuted)
-        root.addView(dateText, lp(990f, 119f, 245f, 20f))
-        homeOnlyViews.add(dateText)
+        dateText = label("", 18f, textMuted)
+        dateText.maxLines = 2
+        root.addView(dateText, lp(MID_X + 18f, CONTENT_Y + 112f, MID_W - 36f, 52f))
     }
 
     private fun updateDate() {
-        val s = SimpleDateFormat("EEE, d MMM", Locale.forLanguageTag("es")).format(Date())
+        val s = SimpleDateFormat("EEEE, d 'de' MMMM", Locale.forLanguageTag("es")).format(Date())
             .replaceFirstChar { it.uppercase() }
         if (s != lastDate) {
             lastDate = s
@@ -951,73 +1045,80 @@ class MainActivity : Activity() {
 
     // ---- Viaje: ubicación y clima actuales ----
 
-    private fun infoBlock(name: String, value: TextView): LinearLayout {
-        val col = LinearLayout(this)
-        col.orientation = LinearLayout.VERTICAL
-        col.addView(label(name, 20f, textMuted))
-        value.maxLines = 2
-        col.addView(value, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(4f) })
-        return col
-    }
-
     private fun buildTripCard() {
-        card(670f, 70f, 260f, 340f)
+        card(TRIP_X, CONTENT_Y, TRIP_W, CARD_H)
+        val x = TRIP_X + 16f
+        val w = TRIP_W - 32f
 
         val head = LinearLayout(this)
         head.orientation = LinearLayout.HORIZONTAL
         head.gravity = Gravity.CENTER_VERTICAL
         head.addView(
-            iconView(R.drawable.ic_nav, 30f, null, 0f, blue),
-            LinearLayout.LayoutParams(px(30f), px(30f)).apply { rightMargin = px(12f) }
+            iconView(R.drawable.ic_nav, 28f, null, 0f, blue),
+            LinearLayout.LayoutParams(px(28f), px(28f)).apply { rightMargin = px(10f) }
         )
         head.addView(label("Viaje", 28f, Color.WHITE, true))
-        root.addView(head, lp(688f, 82f, 220f, 38f))
+        root.addView(head, lp(x, CONTENT_Y + 14f, w, 36f))
 
-        locationText = label("", 23f, Color.WHITE, true)
-        root.addView(label("UBICACIÓN ACTUAL", 16f, textMuted, true), lp(688f, 132f, 220f, 24f))
-        root.addView(locationText, lp(688f, 158f, 220f, 50f))
-        val map = View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF22354D.toInt(), 0xFF142338.toInt(), 0xFF263B4A.toInt())).apply {
-                cornerRadius = px(16f).toFloat()
-            }
+        root.addView(label("Ubicación actual", 17f, textMuted), lp(x, CONTENT_Y + 62f, w, 22f))
+        locationText = label("", 21f, Color.WHITE, true)
+        locationText.maxLines = 2
+        root.addView(locationText, lp(x, CONTENT_Y + 86f, w, 56f))
+
+        val map = ImageView(this).apply {
+            setImageResource(R.drawable.static_trip_map)
+            scaleType = ImageView.ScaleType.CENTER_CROP
         }
-        root.addView(map, lp(688f, 220f, 224f, 166f))
-        val pin = iconView(R.drawable.ic_nav, 40f, null, 4f, lightBlue)
-        root.addView(pin, lp(780f, 274f, 40f, 40f))
+        roundClip(map, 0.07f)
+        root.addView(map, lp(x, CONTENT_Y + 150f, w, 124f))
+        val pin = iconView(R.drawable.ic_pin, 40f, null, 4f, lightBlue)
+        root.addView(pin, lp(x + (w - 40f) / 2f, CONTENT_Y + 150f + 30f, 40f, 40f))
+
+        root.addView(label("Clima actual", 17f, textMuted), lp(x, CONTENT_Y + 286f, w, 22f))
+        tripWeatherText = label("", 19f, Color.WHITE, true)
+        tripWeatherText.maxLines = 2
+        root.addView(tripWeatherText, lp(x, CONTENT_Y + 310f, w, 56f))
     }
 
     private fun buildWeatherCard() {
-        homeOnlyViews.add(card(710f, 145f, 550f, 430f))
-        val heading = label("CLIMA ACTUAL", 22f, textMuted, true)
-        root.addView(heading, lp(750f, 178f, 460f, 32f))
-        homeOnlyViews.add(heading)
-        val locationHeading = label("Ubicación actual", 18f, textMuted)
-        root.addView(locationHeading, lp(750f, 228f, 460f, 28f))
-        homeOnlyViews.add(locationHeading)
-        homeLocationText = label("Buscando ubicación…", 27f, Color.WHITE, true)
-        root.addView(homeLocationText, lp(750f, 262f, 460f, 52f))
-        homeOnlyViews.add(homeLocationText)
-        val weatherIcon = label("⛅", 88f, Color.WHITE, true).apply { gravity = Gravity.CENTER }
-        root.addView(weatherIcon, lp(785f, 338f, 140f, 122f))
-        homeOnlyViews.add(weatherIcon)
-        weatherValue = label("26°C", 64f, Color.WHITE, true)
-        root.addView(weatherValue, lp(955f, 357f, 260f, 82f))
-        homeOnlyViews.add(weatherValue)
-        weatherConditionText = label("Parcialmente nublado", 22f, textMuted)
-        root.addView(weatherConditionText, lp(955f, 438f, 260f, 36f))
-        homeOnlyViews.add(weatherConditionText)
+        card(MID_X, WEATHER_Y, MID_W, WEATHER_H)
+        weatherIcon = label("⛅", 56f, Color.WHITE, true).apply { gravity = Gravity.CENTER }
+        root.addView(weatherIcon, lp(MID_X + 14f, WEATHER_Y + 22f, 88f, 80f))
+
+        weatherValue = label("--°C", 44f, Color.WHITE, true)
+        weatherValue.gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        root.addView(weatherValue, lp(MID_X + 106f, WEATHER_Y + 22f, MID_W - 106f - 16f, 80f))
+
+        weatherConditionText = label("Obteniendo clima…", 18f, Color.WHITE)
+        weatherConditionText.gravity = Gravity.CENTER
+        root.addView(weatherConditionText, lp(MID_X + 12f, WEATHER_Y + 124f, MID_W - 24f, 30f))
+    }
+
+    private fun weatherEmoji(condition: String): String {
+        val c = condition.lowercase(Locale.ROOT)
+        return when {
+            c.contains("tormenta") -> "⛈"
+            c.contains("nieve") || c.contains("nevada") -> "❄"
+            c.contains("lluvia") || c.contains("llovizna") || c.contains("chubasco") -> "🌧"
+            c.contains("niebla") -> "🌫"
+            c.contains("parcialmente") -> "⛅"
+            c.contains("nublado") -> "☁"
+            c.contains("mayormente despejado") -> "🌤"
+            c.contains("despejado") -> "☀"
+            else -> "⛅"
+        }
     }
 
     private fun updateTripViews() {
-        locationText.text = placeName ?: "Buscando ubicación…"
         val gpsPlace = currentLocation?.let { "%.5f, %.5f".format(Locale.US, it.latitude, it.longitude) }
-        if (::homeLocationText.isInitialized) homeLocationText.text = placeName ?: gpsPlace ?: "Buscando ubicación…"
-        if (::weatherValue.isInitialized && ::weatherConditionText.isInitialized) {
-            val weather = (weatherLabel ?: "26°C · Parcialmente nublado").split(" · ", limit = 2)
-            weatherValue.text = weather.firstOrNull() ?: "26°C"
-            weatherConditionText.text = weather.getOrNull(1) ?: "Parcialmente nublado"
-        }
+        locationText.text = placeName ?: gpsPlace ?: "Buscando ubicación…"
+        val weather = (weatherLabel ?: "--°C · Obteniendo clima…").split(" · ", limit = 2)
+        val temperature = weather.firstOrNull() ?: "--°C"
+        val condition = weather.getOrNull(1) ?: "Obteniendo clima…"
+        weatherValue.text = temperature
+        weatherConditionText.text = condition
+        weatherIcon.text = weatherEmoji(condition)
+        tripWeatherText.text = "$temperature · $condition"
         if (selectedTab == "VIAJE") renderTabContent("VIAJE")
     }
 
@@ -1048,10 +1149,10 @@ class MainActivity : Activity() {
         cell.gravity = Gravity.CENTER
         cell.isClickable = true
         cell.setOnClickListener { action() }
-        cell.addView(icon, LinearLayout.LayoutParams(px(76f), px(76f)))
-        val t = label(name, 22f, Color.WHITE)
+        cell.addView(icon, LinearLayout.LayoutParams(px(72f), px(72f)))
+        val t = label(name, 20f, Color.WHITE)
         t.gravity = Gravity.CENTER
-        cell.addView(t, LinearLayout.LayoutParams(WC, WC).apply { topMargin = px(10f) })
+        cell.addView(t, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(10f) })
         return cell
     }
 
@@ -1059,37 +1160,52 @@ class MainActivity : Activity() {
         val dock = LinearLayout(this)
         dock.orientation = LinearLayout.HORIZONTAL
         dock.gravity = Gravity.CENTER
-        dock.background = panelBg()
+        dock.background = panelBg(24f, 0xE63A4550.toInt(), 0xE62A323C.toInt())
 
         recentDock = LinearLayout(this)
         recentDock.orientation = LinearLayout.HORIZONTAL
         recentDock.gravity = Gravity.CENTER
-        dock.addView(recentDock, LinearLayout.LayoutParams(0, MP, 1f))
+        dock.addView(recentDock, LinearLayout.LayoutParams(0, MP, DOCK_SLOTS.toFloat()))
 
-        val appsIcon = iconView(R.drawable.ic_apps, 76f, 0xFF2A3F66.toInt(), 18f)
-        dock.addView(dockCell("Todas las apps", appsIcon) { toggleDrawer() },
-            LinearLayout.LayoutParams(px(170f), MP))
-        root.addView(dock, lp(20f, 430f, 910f, 130f))
+        val appsIcon = iconView(R.drawable.ic_apps, 72f, 0xFF2F4A78.toInt(), 16f)
+        dock.addView(dockCell("Apps", appsIcon) { toggleDrawer() }, LinearLayout.LayoutParams(0, MP, 1f))
+        root.addView(dock, lp(VEHICLE_X, DOCK_Y, DOCK_W, DOCK_H))
         refreshRecentDock()
     }
 
-    /** El dock recuerda apps abiertas desde el launcher y siempre reserva el último espacio al cajón. */
+    /**
+     * El dock muestra las últimas apps abiertas desde el launcher y, si faltan, completa con
+     * Spotify, YouTube, Mensajes y Android Auto (ZLINK). El último espacio siempre abre el cajón.
+     */
     private fun refreshRecentDock() {
         if (!::recentDock.isInitialized) return
         recentDock.removeAllViews()
         val saved = prefs.getString("recent_packages", "")!!.split("|").filter { it.isNotBlank() }
         val launcherApps = appCatalog.loadLauncherApps().associateBy { it.component.packageName }
-        val recent = saved.distinct().mapNotNull { launcherApps[it] }.take(4)
-        val fallback = listOf("com.spotify.music", "com.google.android.youtube")
-            .filter { pkg -> launcherApps.containsKey(pkg) && recent.none { it.component.packageName == pkg } }
-        val chosen = (recent + fallback.mapNotNull { launcherApps[it] }).take(4)
+        val zlinkPkg = findZlink()?.packageName
+        val recent = saved.distinct().mapNotNull { launcherApps[it] }
+        val defaults = mutableListOf<InstalledApp>()
+        launcherApps["com.spotify.music"]?.let { defaults.add(it) }
+        launcherApps["com.google.android.youtube"]?.let { defaults.add(it) }
+        defaultSmsPackage()?.let { launcherApps[it] }?.let { defaults.add(it) }
+        zlinkPkg?.let { launcherApps[it] }?.let { defaults.add(it) }
+        val chosen = (recent.take(DOCK_SLOTS) + defaults)
+            .distinctBy { it.component.packageName }
+            .take(DOCK_SLOTS)
+            .map { if (it.component.packageName == zlinkPkg) it.copy(label = "Android Auto") else it }
         if (chosen.isEmpty()) {
-            val hint = label("Abre una app para fijarla aquí", 17f, textMuted)
+            val hint = label("Abre una app para fijarla aquí", 18f, textMuted)
             hint.gravity = Gravity.CENTER
             recentDock.addView(hint, LinearLayout.LayoutParams(MP, MP))
             return
         }
-        chosen.forEach { app ->
+        for (slot in 0 until DOCK_SLOTS) {
+            val app = chosen.getOrNull(slot)
+            if (app == null) {
+                // Espacio vacío: mantiene las columnas alineadas con el botón "Apps".
+                recentDock.addView(View(this), LinearLayout.LayoutParams(0, MP, 1f))
+                continue
+            }
             val cell = LinearLayout(this)
             cell.orientation = LinearLayout.VERTICAL
             cell.gravity = Gravity.CENTER
@@ -1098,10 +1214,11 @@ class MainActivity : Activity() {
             val icon = ImageView(this)
             icon.setImageDrawable(app.icon)
             icon.scaleType = ImageView.ScaleType.FIT_CENTER
-            cell.addView(icon, LinearLayout.LayoutParams(px(58f), px(58f)))
-            val title = label(app.label, 16f, Color.WHITE)
+            roundClip(icon, 0.22f)
+            cell.addView(icon, LinearLayout.LayoutParams(px(72f), px(72f)))
+            val title = label(app.label, 20f, Color.WHITE)
             title.gravity = Gravity.CENTER
-            cell.addView(title, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(5f) })
+            cell.addView(title, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(10f) })
             recentDock.addView(cell, LinearLayout.LayoutParams(0, MP, 1f))
         }
     }
@@ -1152,9 +1269,9 @@ class MainActivity : Activity() {
         val card = LinearLayout(this)
         card.orientation = LinearLayout.VERTICAL
         mediaCardView = card
-        card.gravity = Gravity.CENTER_HORIZONTAL
+        card.gravity = Gravity.CENTER
         card.background = panelBg()
-        val pad = px(24f)
+        val pad = px(22f)
         card.setPadding(pad, pad, pad, pad)
         card.setOnClickListener {
             if (!isListenerEnabled()) {
@@ -1168,11 +1285,11 @@ class MainActivity : Activity() {
 
         artView = ImageView(this)
         roundClip(artView, 0.16f)
-        card.addView(artView, LinearLayout.LayoutParams(px(200f), px(200f)))
+        card.addView(artView, LinearLayout.LayoutParams(px(ART_SIZE), px(ART_SIZE)))
 
-        titleText = label("", 25f, Color.WHITE, true)
+        titleText = label("", 28f, Color.WHITE, true)
         titleText.gravity = Gravity.CENTER
-        card.addView(titleText, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(12f) })
+        card.addView(titleText, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(18f) })
 
         artistText = label("", 22f, textMuted)
         artistText.gravity = Gravity.CENTER
@@ -1182,66 +1299,56 @@ class MainActivity : Activity() {
         progressBar.max = 1000
         progressBar.progressTintList = ColorStateList.valueOf(blue)
         progressBar.progressBackgroundTintList = ColorStateList.valueOf(strokeColor)
-        card.addView(progressBar, LinearLayout.LayoutParams(MP, px(8f)).apply { topMargin = px(12f) })
+        card.addView(progressBar, LinearLayout.LayoutParams(MP, px(8f)).apply { topMargin = px(18f) })
 
         val controls = LinearLayout(this)
         controls.orientation = LinearLayout.HORIZONTAL
         controls.gravity = Gravity.CENTER
 
-        val prev = iconView(R.drawable.ic_prev, 76f, 0xFF1C3152.toInt(), 16f)
+        val prev = iconView(R.drawable.ic_prev, 64f, null, 14f)
         prev.setOnClickListener {
             controller?.transportControls?.skipToPrevious() ?: sendMediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
         }
-        controls.addView(prev, LinearLayout.LayoutParams(px(76f), px(76f)))
+        controls.addView(prev, LinearLayout.LayoutParams(px(64f), px(64f)))
 
-        playBtn = iconView(R.drawable.ic_play, 100f, null, 24f, blue)
+        playBtn = iconView(R.drawable.ic_play, 88f, null, 20f, blue)
         playBtn.background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(0x00000000)
             setStroke(max(2, px(3f)), blue)
         }
-        playBtn.setOnClickListener {
-            val c = controller
-            if (c == null) {
-                sendMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
-            } else if (isPlaying) {
-                c.transportControls.pause()
-            } else {
-                c.transportControls.play()
-            }
-        }
+        playBtn.setOnClickListener { togglePlayback() }
         controls.addView(
             playBtn,
-            LinearLayout.LayoutParams(px(100f), px(100f)).apply {
-                leftMargin = px(32f)
-                rightMargin = px(32f)
+            LinearLayout.LayoutParams(px(88f), px(88f)).apply {
+                leftMargin = px(26f)
+                rightMargin = px(26f)
             }
         )
 
-        val next = iconView(R.drawable.ic_next, 76f, 0xFF1C3152.toInt(), 16f)
+        val next = iconView(R.drawable.ic_next, 64f, null, 14f)
         next.setOnClickListener {
             controller?.transportControls?.skipToNext() ?: sendMediaKey(KeyEvent.KEYCODE_MEDIA_NEXT)
         }
-        controls.addView(next, LinearLayout.LayoutParams(px(76f), px(76f)))
+        controls.addView(next, LinearLayout.LayoutParams(px(64f), px(64f)))
 
-        card.addView(controls, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(12f) })
+        card.addView(controls, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(22f) })
 
-        // Ocupa toda la columna derecha (antes compartía el espacio con Mantenimiento)
-        root.addView(card, lp(950f, 70f, 310f, 490f))
-        multimediaViews.add(card)
+        // Ocupa toda la columna derecha, a la altura de las tarjetas y del dock.
+        root.addView(card, lp(MEDIA_X, CONTENT_Y, MEDIA_W, MEDIA_H))
         val edit = TextView(this).apply {
             text = "✎"
             gravity = Gravity.CENTER
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, 28f * ss)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, 24f * ss)
             setTextColor(Color.WHITE)
-            background = rounded(0xAA45536B.toInt(), 30f)
+            background = rounded(0xAA45536B.toInt(), 20f)
+            isClickable = true
             setOnClickListener {
                 if (selectedTab == "HOME") showManager() else showManagerDialog()
             }
         }
         mediaEditButton = edit
-        root.addView(edit, lp(1212f, 78f, 40f, 40f))
-        multimediaViews.add(edit)
+        root.addView(edit, lp(MEDIA_X + MEDIA_W - 52f, CONTENT_Y + 12f, 40f, 40f))
     }
 
     /** Respaldo para apps de música Bluetooth que no publican una sesión de medios. */
@@ -1257,9 +1364,11 @@ class MainActivity : Activity() {
 
     // ---- Barra inferior ----
 
-    private fun barButton(res: Int, tint: Int, action: () -> Unit): ImageView {
+    private fun barButton(res: Int, tint: Int, description: String, action: () -> Unit): ImageView {
         val b = iconView(res, 40f, null, 14f, tint)
+        b.background = glow()
         b.isClickable = true
+        b.contentDescription = description
         b.setOnClickListener { action() }
         return b
     }
@@ -1268,21 +1377,23 @@ class MainActivity : Activity() {
         val bar = LinearLayout(this)
         bar.orientation = LinearLayout.HORIZONTAL
         bar.gravity = Gravity.CENTER
-        bar.background = panelBg(30f)
+        bar.background = panelBg(34f, 0xE60F1A24.toInt(), 0xE60A1219.toInt())
 
         val tint = lightBlue
         bottomBar = bar
-        nightBtn = barButton(R.drawable.ic_moon, tint) { toggleNight() }
+        nightBtn = barButton(R.drawable.ic_moon, tint, "Modo nocturno") { toggleNight() }
 
         val buttons = listOf(
-            barButton(R.drawable.ic_power, tint) { screenOff() },
-            barButton(R.drawable.ic_mic, tint) { openAssistant() },
-            barButton(R.drawable.ic_settings, tint) { openSettings() },
-            barButton(R.drawable.ic_phone, tint) { openPhone() },
+            barButton(R.drawable.ic_power, tint, "Apagar pantalla") { screenOff() },
+            barButton(R.drawable.ic_mic, tint, "Asistente de voz") { openAssistant() },
+            barButton(R.drawable.ic_settings, tint, "Ajustes") { openSettings() },
+            barButton(R.drawable.ic_phone, tint, "Teléfono") { openPhone() },
+            barButton(R.drawable.ic_pin, tint, "Mapas") { openMaps() },
+            barButton(R.drawable.ic_apps, tint, "Todas las apps") { toggleDrawer() },
             nightBtn
         )
         for (b in buttons) bar.addView(b, LinearLayout.LayoutParams(0, MP, 1f))
-        root.addView(bar, lp(20f, 590f, 1240f, 68f))
+        root.addView(bar, lp(20f, BAR_Y, 1240f, BAR_H))
     }
 
     private fun buildEditOverlay() {
@@ -1325,7 +1436,7 @@ class MainActivity : Activity() {
             options.addView(row, LinearLayout.LayoutParams(MP, 0, 1f))
         }
         panel.addView(options, LinearLayout.LayoutParams(0, MP, 0.62f))
-        editOverlay.addView(panel, lp(40f, 80f, 820f, 480f))
+        editOverlay.addView(panel, lp(40f, CONTENT_Y, 820f, 500f))
         val close = TextView(this).apply {
             text = "LISTO   ×"
             gravity = Gravity.CENTER
@@ -1334,7 +1445,7 @@ class MainActivity : Activity() {
                 if (selectedTab == "HOME") editOverlay.visibility = View.GONE else showTabContent(selectedTab)
             }
         }
-        editOverlay.addView(close, lp(760f, 575f, 100f, 42f))
+        editOverlay.addView(close, lp(760f, 590f, 100f, 42f))
         root.addView(editOverlay, FrameLayout.LayoutParams(MP, MP))
     }
 
@@ -1357,7 +1468,7 @@ class MainActivity : Activity() {
         for (i in 0 until root.childCount) {
             val view = root.getChildAt(i)
             val lp = view.layoutParams as? FrameLayout.LayoutParams ?: continue
-            if (lp.width < 0 || lp.height < 0 || lp.width >= uiW * 0.9f || lp.height >= uiH * 0.9f) continue
+            if (lp.width < 0 || lp.height < 0) continue
             val centerX = (lp.leftMargin + lp.width / 2f) / sx
             val centerY = (lp.topMargin + lp.height / 2f) / sy
             val region = panelRegions.firstOrNull {
@@ -1377,10 +1488,6 @@ class MainActivity : Activity() {
                 view.layoutParams = lp
             }
         }
-        for (region in panelRegions) {
-            val hidden = prefs.getBoolean("panel.${region.id}.hidden", false)
-            root.childrenForPanel(region.id).forEach { it.visibility = if (hidden) View.GONE else View.VISIBLE }
-        }
     }
 
     private fun ViewGroup.childrenForPanel(id: String): List<View> =
@@ -1393,19 +1500,26 @@ class MainActivity : Activity() {
         x >= left && x <= left + region.width && y >= top && y <= top + region.height
     }
 
+    /** Solo se editan paneles en HOME y sin ninguna capa encima. */
+    private fun panelEditingAllowed(): Boolean = uiReady && selectedTab == "HOME" &&
+        drawer.visibility != View.VISIBLE && blackout.visibility != View.VISIBLE &&
+        editOverlay.visibility != View.VISIBLE
+
+    private fun panelTitle(id: String): String = when (id) {
+        "vehicle" -> "Vehículo y velocímetro"
+        "clock" -> "Reloj y fecha"
+        "weather" -> "Clima"
+        "trip" -> "Viaje y ubicación"
+        "dock" -> "Accesos rápidos"
+        "media" -> "Reproductor multimedia"
+        "bottom" -> "Barra inferior"
+        else -> "Panel"
+    }
+
     private fun showPanelEditor(id: String) {
         if (panelRegions.none { it.id == id }) return
-        val title = when (id) {
-            "vehicle" -> "Vehículo y velocímetro"
-            "clock" -> "Reloj y fecha"
-            "trip" -> "Viaje y clima"
-            "dock" -> "Accesos rápidos"
-            "media" -> "Reproductor multimedia"
-            "bottom" -> "Barra inferior"
-            else -> "Panel"
-        }
         android.app.AlertDialog.Builder(this)
-            .setTitle(title)
+            .setTitle(panelTitle(id))
             .setItems(arrayOf("Mover panel", "Ocultar panel", "Restaurar este panel")) { _, which ->
                 when (which) {
                     0 -> {
@@ -1446,17 +1560,7 @@ class MainActivity : Activity() {
             toast("Mantén pulsado un panel para editarlo.")
             return
         }
-        val labels = hidden.map { region ->
-            when (region.id) {
-                "vehicle" -> "Vehículo y velocímetro"
-                "clock" -> "Reloj y fecha"
-                "trip" -> "Viaje y clima"
-                "dock" -> "Accesos rápidos"
-                "media" -> "Reproductor multimedia"
-                "bottom" -> "Barra inferior"
-                else -> region.id
-            }
-        }.toTypedArray()
+        val labels = hidden.map { panelTitle(it.id) }.toTypedArray()
         android.app.AlertDialog.Builder(this)
             .setTitle("Recuperar panel")
             .setItems(labels) { _, which ->
@@ -1477,8 +1581,7 @@ class MainActivity : Activity() {
                 panelDragViews = emptyList()
                 panelDownX = event.rawX
                 panelDownY = event.rawY
-                pendingPanelId = if (uiReady && drawer.visibility != View.VISIBLE &&
-                    blackout.visibility != View.VISIBLE) panelAt(event.x / sx, event.y / sy)?.id else null
+                pendingPanelId = if (panelEditingAllowed()) panelAt(event.x / sx, event.y / sy)?.id else null
                 val selectedMoveId = moveModePanelId
                 if (selectedMoveId != null && pendingPanelId == selectedMoveId) {
                     panelDragging = true
@@ -1496,7 +1599,7 @@ class MainActivity : Activity() {
                         if (pendingPanelId == id && uiReady && !panelDragging) showPanelEditor(id)
                     }
                     handler.postDelayed(panelLongPressTask!!, ViewConfiguration.getLongPressTimeout().toLong())
-                } else if (uiReady && drawer.visibility != View.VISIBLE && blackout.visibility != View.VISIBLE) {
+                } else if (panelEditingAllowed()) {
                     panelLongPressTask = Runnable {
                         if (pendingPanelId == null && uiReady) showHiddenPanelsDialog()
                     }
@@ -1599,6 +1702,7 @@ class MainActivity : Activity() {
     private fun screenOff() {
         closeDrawer()
         blackout.visibility = View.VISIBLE
+        restackOverlays()
         applyBrightness()
     }
 
@@ -1611,20 +1715,33 @@ class MainActivity : Activity() {
 
     private fun buildDrawer() {
         drawer = FrameLayout(this)
-        drawer.setBackgroundColor(0xF2030812.toInt())
+        drawer.background = GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            intArrayOf(0xF405090F.toInt(), 0xF40F1E2E.toInt(), 0xF4070D14.toInt())
+        )
         drawer.visibility = View.GONE
         drawer.isClickable = true
 
-        drawer.addView(label("Aplicaciones", 32f, Color.WHITE, true), lp(60f, 30f, 600f, 44f))
+        val head = LinearLayout(this)
+        head.orientation = LinearLayout.HORIZONTAL
+        head.gravity = Gravity.CENTER_VERTICAL
+        head.addView(
+            iconView(R.drawable.ic_apps, 34f, null, 0f, lightBlue),
+            LinearLayout.LayoutParams(px(34f), px(34f)).apply { rightMargin = px(14f) }
+        )
+        head.addView(label("Todas las apps", 30f, Color.WHITE, true))
+        drawer.addView(head, lp(40f, 14f, 700f, 48f))
 
-        val close = iconView(R.drawable.ic_close, 56f, null, 12f, Color.WHITE)
+        val close = iconView(R.drawable.ic_close, 52f, 0x33FFFFFF, 12f, Color.WHITE)
         close.setOnClickListener { closeDrawer() }
-        drawer.addView(close, lp(1180f, 20f, 64f, 64f))
+        drawer.addView(close, lp(1196f, 12f, 52f, 52f))
 
         drawerGrid = GridView(this)
         drawerGrid.numColumns = 7
         drawerGrid.stretchMode = GridView.STRETCH_COLUMN_WIDTH
         drawerGrid.verticalSpacing = px(8f)
+        drawerGrid.isVerticalScrollBarEnabled = false
+        drawerGrid.overScrollMode = View.OVER_SCROLL_NEVER
         drawerGrid.setSelector(ColorDrawable(Color.TRANSPARENT))
         drawerGrid.setOnItemClickListener { _, _, position, _ ->
             val app = apps.getOrNull(position)
@@ -1638,7 +1755,7 @@ class MainActivity : Activity() {
                 }
             }
         }
-        drawer.addView(drawerGrid, lp(60f, 92f, 1160f, 530f))
+        drawer.addView(drawerGrid, lp(40f, 76f, 1200f, 546f))
 
         root.addView(drawer, FrameLayout.LayoutParams(MP, MP))
     }
@@ -1653,13 +1770,14 @@ class MainActivity : Activity() {
             val cell: LinearLayout = (convertView as? LinearLayout) ?: LinearLayout(this@MainActivity).also { c ->
                 c.orientation = LinearLayout.VERTICAL
                 c.gravity = Gravity.CENTER_HORIZONTAL
-                c.setPadding(0, px(10f), 0, px(10f))
+                c.setPadding(px(6f), px(10f), px(6f), px(10f))
 
                 val icon = ImageView(this@MainActivity)
                 icon.id = ICON_ID
-                c.addView(icon, LinearLayout.LayoutParams(px(76f), px(76f)))
+                roundClip(icon, 0.22f)
+                c.addView(icon, LinearLayout.LayoutParams(px(72f), px(72f)))
 
-                val name = label("", 20f, Color.WHITE)
+                val name = label("", 19f, Color.WHITE)
                 name.id = NAME_ID
                 name.gravity = Gravity.CENTER
                 c.addView(name, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(8f) })
@@ -1671,10 +1789,13 @@ class MainActivity : Activity() {
     }
 
     private fun openDrawer() {
-        apps = appCatalog.loadLauncherApps()
+        apps = appCatalog.loadLauncherApps().filter { it.component.packageName != packageName }
         drawerGrid.adapter = AppAdapter(apps)
         drawer.visibility = View.VISIBLE
         drawer.bringToFront()
+        // La barra inferior sigue visible para volver a tocar "Todas las apps" y cerrar el cajón.
+        bottomBar.bringToFront()
+        restackOverlays()
     }
 
     private fun closeDrawer() {
@@ -1768,6 +1889,15 @@ class MainActivity : Activity() {
         findZlink()?.let { if (launchComponent(it)) return }
         openDrawer()
         toast("No encontré la app ZLINK5. Elige una de la lista.")
+    }
+
+    /** Mapas: Google Maps y, si no está, cualquier app de mapas o navegación. */
+    private fun openMaps() {
+        if (launchPackage("com.google.android.apps.maps")) return
+        val maps = Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MAPS)
+        if (startSafe(maps)) return
+        openDrawer()
+        toast("No encontré Google Maps. Elige una app de navegación de la lista.")
     }
 
     private fun openAssistant() {
@@ -1932,7 +2062,8 @@ class MainActivity : Activity() {
     private companion object {
         const val ICON_ID = 7001
         const val NAME_ID = 7002
-        const val ART_SIZE = 220f
+        const val ART_SIZE = 250f
+        const val LAYOUT_VERSION = 2
         const val TRIP_STOP_AFTER_STATIONARY_MS = 5 * 60 * 1000L
         const val SPEED_LIMIT_MIN_INTERVAL_MS = 60 * 1000L
         const val SPEED_LIMIT_MAX_INTERVAL_MS = 5 * 60 * 1000L

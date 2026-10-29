@@ -8,9 +8,9 @@ Launcher Android para pantallas de auto, con tema azul oscuro inspirado en el Ho
 - Reloj y fecha en español.
 - Panel de viaje con ubicación aproximada y clima actual. Usa el geocodificador del dispositivo y, como respaldo, Nominatim; el clima viene de Open-Meteo. Requiere conexión a internet.
 - Reproductor con carátula, título, artista, progreso y controles. Prioriza Music BT y usa otras sesiones multimedia activas si hace falta. El acceso a notificaciones debe habilitarse para leer la sesión.
-- Dock dinámico con hasta cuatro aplicaciones iniciadas desde el launcher y un acceso fijo al cajón de aplicaciones. Android no informa de forma fiable qué aplicaciones abrió otro launcher sin conceder acceso de uso.
+- Dock dinámico con hasta cuatro aplicaciones iniciadas desde el launcher (si faltan, se completa con Spotify, YouTube, Mensajes y Android Auto/ZLINK) y un acceso fijo al cajón de aplicaciones. Android no informa de forma fiable qué aplicaciones abrió otro launcher sin conceder acceso de uso.
 - Paneles movibles y ocultables. Mantén pulsada una tarjeta para editarla; las posiciones se guardan entre reinicios.
-- Barra inferior para apagar la pantalla, abrir el asistente, ajustes, teléfono Bluetooth y modo nocturno.
+- Barra inferior para apagar la pantalla, abrir el asistente, ajustes, teléfono Bluetooth, Google Maps, el cajón con todas las apps instaladas y el modo nocturno.
 
 El launcher no incluye lectura OBD2; no muestra consumo ni temperatura del motor.
 
