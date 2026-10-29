@@ -95,6 +95,9 @@ class MainActivity : Activity() {
     // ---- Vistas ----
     private lateinit var ring: SpeedRingView
     private lateinit var speedText: TextView
+    private lateinit var greetingText: TextView
+    private lateinit var homeLocationText: TextView
+    private lateinit var weatherConditionText: TextView
     private lateinit var dateText: TextView
     private lateinit var locationText: TextView
     private lateinit var artView: ImageView
@@ -115,15 +118,18 @@ class MainActivity : Activity() {
     private lateinit var editOverlay: FrameLayout
     private lateinit var tabsBar: LinearLayout
     private lateinit var bottomBar: LinearLayout
-    private lateinit var mediaPageTitle: TextView
-    private lateinit var mediaPageArtist: TextView
+    private lateinit var mediaCardView: LinearLayout
+    private lateinit var mediaEditButton: TextView
     private lateinit var tripPageLocation: TextView
     private lateinit var tripPageDistance: TextView
     private lateinit var tripPageRoute: TextView
     private lateinit var tripPageSpeed: TextView
     private lateinit var tripActionButton: TextView
+    private lateinit var tripSpeedometer: SpeedometerView
     private lateinit var weatherValue: TextView
     private val speedViews = mutableSetOf<View>()
+    private val homeOnlyViews = mutableSetOf<View>()
+    private val multimediaViews = mutableSetOf<View>()
     private var selectedTab = "HOME"
     private val tabs = mutableListOf("HOME", "VIAJE", "MULTIMEDIA", "AJUSTES COCHE")
     private val homeViews = mutableListOf<View>()
@@ -140,18 +146,26 @@ class MainActivity : Activity() {
     // ---- Estado ----
     private var nightMode = false
     private var lastDate = ""
+    private var userName = ""
     private var currentLocation: Location? = null
     private var currentSpeedKmh = 0
+    private var currentSpeedLimitKmh = 90
+    private var speedLimitFromMap = false
+    private var lastSpeedLimitLocation: Location? = null
+    private var lastSpeedLimitLookupAt = 0L
+    private var speedLimitLookupInFlight = false
     private var tripActive = false
     private var tripDistanceMeters = 0f
     private var tripLastPoint: Location? = null
+    private var movingGpsFixes = 0
+    private var stationarySince = 0L
     private var overLimit = false
-    private val speedLimitKmh = 90
+    private val fallbackSpeedLimitKmh = 90
 
     private val panelRegions = listOf(
-        PanelRegion("vehicle", 20f, 70f, 360f, 340f),
-        PanelRegion("clock", 400f, 70f, 250f, 120f),
-        PanelRegion("weather", 400f, 205f, 250f, 205f),
+        PanelRegion("vehicle", 30f, 145f, 650f, 430f),
+        PanelRegion("clock", 970f, 70f, 290f, 75f),
+        PanelRegion("weather", 710f, 145f, 550f, 430f),
         PanelRegion("trip", 670f, 70f, 260f, 340f),
         PanelRegion("dock", 20f, 430f, 910f, 130f),
         PanelRegion("media", 950f, 70f, 310f, 490f),
@@ -208,10 +222,12 @@ class MainActivity : Activity() {
             currentSpeedKmh = shown
             speedText.text = shown.toString()
             ring.setSpeed(shown)
-            updateTripTracking(location)
+            updateAutomaticTrip(location)
+            maybeLookupSpeedLimit(location)
             updateSpeedWarning(shown)
+            if (::tripSpeedometer.isInitialized) tripSpeedometer.setReading(shown, currentSpeedLimitKmh)
+            if (uiReady) updateTripViews()
             tripInfoRepository.refresh(location)
-            if (selectedTab == "VIAJE") renderTabContent("VIAJE")
         }
     }
 
@@ -229,6 +245,7 @@ class MainActivity : Activity() {
         nightMode = prefs.getBoolean("night", false)
         placeName = prefs.getString("place", null)
         weatherLabel = prefs.getString("weather", null)
+        userName = prefs.getString("user_name", "") ?: ""
         tripActive = prefs.getBoolean("trip_active", false)
         tripDistanceMeters = prefs.getFloat("trip_distance_m", 0f)
         tripInfoRepository = TripInfoRepository(
@@ -427,6 +444,8 @@ class MainActivity : Activity() {
     private fun buildUi() {
         root.removeAllViews()
         speedViews.clear()
+        homeOnlyViews.clear()
+        multimediaViews.clear()
         sx = uiW / 1280f
         sy = uiH / 720f
         ss = min(sx, sy)
@@ -443,6 +462,7 @@ class MainActivity : Activity() {
         configureMovablePanels()
         buildOverlays()
         buildEditOverlay()
+        homeOnlyViews.addAll(speedViews)
         homeViews.clear()
         for (i in 0 until root.childCount) {
             val view = root.getChildAt(i)
@@ -468,30 +488,22 @@ class MainActivity : Activity() {
     // ---- Tarjeta del vehículo (velocímetro) ----
 
     private fun buildVehicleCard() {
-        card(20f, 70f, 360f, 340f)
+        speedViews.add(card(30f, 145f, 650f, 430f))
 
-        val title = LinearLayout(this)
-        title.orientation = LinearLayout.HORIZONTAL
-        title.gravity = Gravity.CENTER_VERTICAL
-        title.addView(
-            iconView(R.drawable.ic_car, 36f, null, 0f, lightBlue),
-            LinearLayout.LayoutParams(px(36f), px(36f)).apply { rightMargin = px(12f) }
-        )
-        title.addView(label("Civic 2012", 30f, lightBlue, true))
-        root.addView(title, lp(40f, 82f, 260f, 40f))
+        greetingText = label(greeting(), 34f, Color.WHITE, true)
+        root.addView(greetingText, lp(40f, 76f, 760f, 52f))
+        speedViews.add(greetingText)
 
-        // El velocímetro queda arriba y el carro debajo, sin que se toquen
-        // (anillo: y 84..284; carro: y 294..450).
-        ring = SpeedRingView(this, 10f * ss)
-        root.addView(ring, lp(100f, 126f, 180f, 180f))
+        ring = SpeedRingView(this, 13f * ss)
+        root.addView(ring, lp(240f, 168f, 230f, 230f))
 
-        speedText = label("0", 80f, Color.WHITE, true)
+        speedText = label("0", 92f, Color.WHITE, true)
         speedText.gravity = Gravity.CENTER
-        root.addView(speedText, lp(100f, 164f, 180f, 76f))
+        root.addView(speedText, lp(240f, 226f, 230f, 88f))
 
-        val unit = label("km/h", 26f, textMuted)
+        val unit = label("km/h", 28f, textMuted)
         unit.gravity = Gravity.CENTER
-        root.addView(unit, lp(100f, 236f, 180f, 28f))
+        root.addView(unit, lp(240f, 311f, 230f, 34f))
         speedViews.add(ring)
         speedViews.add(speedText)
         speedViews.add(unit)
@@ -499,8 +511,11 @@ class MainActivity : Activity() {
         val car = ImageView(this)
         car.setImageResource(R.drawable.car)
         car.scaleType = ImageView.ScaleType.FIT_CENTER
-        root.addView(car, lp(55f, 292f, 290f, 106f))
+        root.addView(car, lp(45f, 382f, 620f, 164f))
+        speedViews.add(car)
     }
+
+    private fun greeting(): String = if (userName.isBlank()) "Hola, bienvenido" else "Hola, bienvenido, $userName"
 
     private fun buildTabs() {
         val bar = LinearLayout(this).apply {
@@ -550,6 +565,15 @@ class MainActivity : Activity() {
 
     private fun showTabContent(tab: String) {
         editOverlay.removeAllViews()
+        if (tab == "MULTIMEDIA") {
+            editOverlay.setBackgroundColor(Color.TRANSPARENT)
+            editOverlay.isClickable = false
+            buildMultimediaPage()
+            editOverlay.visibility = View.VISIBLE
+            return
+        }
+        editOverlay.setBackgroundColor(0xAA02060E.toInt())
+        editOverlay.isClickable = true
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -560,72 +584,139 @@ class MainActivity : Activity() {
         panel.addView(heading, LinearLayout.LayoutParams(MP, px(48f)))
         when (tab) {
             "VIAJE" -> buildTripPage(panel)
-            "MULTIMEDIA" -> buildMultimediaPage(panel)
+            "MULTIMEDIA" -> Unit
             "AJUSTES COCHE" -> buildCarSettingsPage(panel)
             else -> buildGenericPage(panel, tab)
         }
-        editOverlay.addView(panel, lp(300f, 80f, 680f, 475f))
+        editOverlay.addView(panel, lp(300f, 70f, 680f, 510f))
         editOverlay.visibility = View.VISIBLE
     }
 
     private fun showSelectedTab() {
         editOverlay.visibility = View.GONE
+        homeViews.forEach { it.visibility = View.GONE }
         if (selectedTab == "HOME") {
-            homeViews.forEach { view ->
-                val region = (view.tag as? String)?.removePrefix("movable-panel:")
-                view.visibility = if ((region == "clock" && view !== dateText) || region == "weather" || view in speedViews) View.VISIBLE else View.GONE
-            }
+            homeOnlyViews.forEach { it.visibility = View.VISIBLE }
+            mediaCardView.visibility = View.VISIBLE
+            mediaEditButton.visibility = View.VISIBLE
+            mediaCardView.layoutParams = lp(950f, 70f, 310f, 490f)
         } else {
-            homeViews.forEach { view ->
-                val region = (view.tag as? String)?.removePrefix("movable-panel:")
-                view.visibility = if (selectedTab == "MULTIMEDIA" && region == "media") View.VISIBLE else View.GONE
+            multimediaViews.forEach { it.visibility = View.GONE }
+            if (selectedTab == "MULTIMEDIA") {
+                mediaCardView.visibility = View.VISIBLE
+                mediaEditButton.visibility = View.GONE
+                mediaCardView.layoutParams = lp(35f, 75f, 555f, 490f)
             }
             showTabContent(selectedTab)
         }
     }
 
     private fun buildTripPage(panel: LinearLayout) {
-        panel.addView(label("Ubicación actual", 19f, textMuted), LinearLayout.LayoutParams(MP, px(28f)))
-        tripPageLocation = label("Buscando ubicación GPS…", 24f, Color.WHITE, true)
-        panel.addView(tripPageLocation, LinearLayout.LayoutParams(MP, px(45f)))
-        tripPageRoute = label("Desde: —\nHasta: —", 19f, Color.WHITE)
-        tripPageRoute.maxLines = 3
-        panel.addView(tripPageRoute, LinearLayout.LayoutParams(MP, px(68f)))
-        tripPageDistance = label("Recorrido: 0.0 km", 20f, lightBlue, true)
-        panel.addView(tripPageDistance, LinearLayout.LayoutParams(MP, px(36f)))
-        tripPageSpeed = label("Límite local: 90 km/h", 19f, Color.WHITE, true)
-        panel.addView(tripPageSpeed, LinearLayout.LayoutParams(MP, px(34f)))
-        val routeMap = FrameLayout(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF24384D.toInt(), 0xFF13243A.toInt(), 0xFF2E4147.toInt())).apply {
-                cornerRadius = px(16f).toFloat()
-            }
-            val route = label("●  ─────────  ◆", 22f, lightBlue, true).apply { gravity = Gravity.CENTER }
-            addView(route, FrameLayout.LayoutParams(MP, MP))
+        panel.addView(label("UBICACIÓN ACTUAL", 16f, textMuted, true), LinearLayout.LayoutParams(MP, px(24f)))
+        tripPageLocation = label("Buscando ubicación GPS…", 22f, Color.WHITE, true)
+        panel.addView(tripPageLocation, LinearLayout.LayoutParams(MP, px(36f)))
+        tripPageRoute = label("Desde: esperando GPS\nHasta: en recorrido", 18f, Color.WHITE)
+        tripPageRoute.maxLines = 2
+        panel.addView(tripPageRoute, LinearLayout.LayoutParams(MP, px(52f)))
+        tripPageDistance = label("RECORRIDO  ·  0.0 km", 18f, lightBlue, true)
+        panel.addView(tripPageDistance, LinearLayout.LayoutParams(MP, px(30f)))
+        val routeMap = FrameLayout(this)
+        val mapImage = ImageView(this).apply {
+            setImageResource(R.drawable.static_trip_map)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            roundClip(this, 0.08f)
+            contentDescription = "Fondo de mapa estático en azul oscuro"
         }
-        panel.addView(routeMap, LinearLayout.LayoutParams(MP, px(92f)))
+        routeMap.addView(mapImage, FrameLayout.LayoutParams(MP, MP))
+        val mapCaption = label("MAPA ESTÁTICO  ·  RECORRIDO GPS", 11f, 0xFFD4E3FA.toInt(), true).apply {
+            gravity = Gravity.BOTTOM or Gravity.END
+            setPadding(0, 0, px(10f), px(6f))
+        }
+        routeMap.addView(mapCaption, FrameLayout.LayoutParams(MP, MP))
+        panel.addView(routeMap, LinearLayout.LayoutParams(MP, px(78f)))
+        tripSpeedometer = SpeedometerView(this)
+        tripSpeedometer.setReading(currentSpeedKmh, currentSpeedLimitKmh)
+        val gaugeCard = FrameLayout(this).apply { background = panelBg(18f) }
+        gaugeCard.addView(tripSpeedometer, FrameLayout.LayoutParams(MP, MP))
+        panel.addView(gaugeCard, LinearLayout.LayoutParams(MP, px(120f)))
+        tripPageSpeed = label("LÍMITE APROX.  ·  90 km/h", 16f, textMuted, true)
+        tripPageSpeed.setPadding(px(10f), 0, px(10f), 0)
+        panel.addView(tripPageSpeed, LinearLayout.LayoutParams(MP, px(28f)))
         tripActionButton = TextView(this).apply {
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
             background = rounded(0xFF304E81.toInt(), 20f)
             setOnClickListener { toggleTrip() }
         }
-        panel.addView(tripActionButton, LinearLayout.LayoutParams(MP, px(54f)).apply { topMargin = px(8f) })
+        panel.addView(tripActionButton, LinearLayout.LayoutParams(MP, px(48f)).apply { topMargin = px(5f) })
         renderTabContent("VIAJE")
     }
 
-    private fun buildMultimediaPage(panel: LinearLayout) {
-        panel.addView(label("Reproduciendo", 18f, textMuted), LinearLayout.LayoutParams(MP, px(28f)))
-        mediaPageTitle = label("Sin reproducción", 25f, Color.WHITE, true)
-        panel.addView(mediaPageTitle, LinearLayout.LayoutParams(MP, px(38f)))
-        mediaPageArtist = label("", 19f, textMuted)
-        panel.addView(mediaPageArtist, LinearLayout.LayoutParams(MP, px(30f)))
-        mediaPageTitle.text = titleText.text
-        mediaPageArtist.text = artistText.text
-        multimediaButton(panel, "ABRIR REPRODUCTOR MUSIC BT", ::openMusic)
-        multimediaButton(panel, "REPRODUCIR / PAUSAR", ::togglePlayback)
-        multimediaButton(panel, "RADIO", ::openRadio)
-        multimediaButton(panel, "YOUTUBE", ::openYoutube)
+    private fun buildMultimediaPage() {
+        val radioCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = panelBg(22f)
+            setPadding(px(22f), px(16f), px(22f), px(16f))
+        }
+        radioCard.addView(label("RADIO FM", 22f, Color.WHITE, true),
+            LinearLayout.LayoutParams(MP, px(36f)))
+        radioCard.addView(label("Sintoniza desde la app de radio del vehículo", 16f, textMuted).apply {
+            gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(MP, px(42f)))
+        val radioButton = TextView(this).apply {
+            text = "ABRIR RADIO"
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, 19f * ss)
+            background = rounded(0xFF263E68.toInt(), 16f, strokeColor)
+            setOnClickListener { openRadio() }
+        }
+        radioCard.addView(radioButton, LinearLayout.LayoutParams(MP, px(52f)))
+        editOverlay.addView(radioCard, lp(620f, 82f, 310f, 160f))
+
+        val appsCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = panelBg(22f)
+            setPadding(px(18f), px(14f), px(18f), px(14f))
+        }
+        appsCard.addView(label("APPS MULTIMEDIA", 19f, textMuted, true),
+            LinearLayout.LayoutParams(MP, px(30f)))
+        val appRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val keywords = listOf("music", "radio", "spotify", "youtube", "video", "vlc", "podcast", "fm")
+        val mediaApps = appCatalog.loadLauncherApps()
+            .filter { app -> app.component.packageName != packageName && keywords.any { key ->
+                app.label.contains(key, ignoreCase = true) || app.component.packageName.contains(key, ignoreCase = true)
+            } }
+            .distinctBy { it.component.packageName }
+            .take(5)
+        if (mediaApps.isEmpty()) {
+            appRow.addView(label("No se encontraron apps multimedia instaladas", 16f, textMuted),
+                LinearLayout.LayoutParams(MP, MP))
+        } else {
+            mediaApps.forEach { app ->
+                val cell = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    isClickable = true
+                    setOnClickListener { launchComponent(app.component) }
+                    contentDescription = "Abrir ${app.label}"
+                }
+                val icon = ImageView(this).apply {
+                    setImageDrawable(app.icon)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                }
+                cell.addView(icon, LinearLayout.LayoutParams(px(64f), px(64f)))
+                cell.addView(label(app.label, 14f, Color.WHITE).apply { gravity = Gravity.CENTER },
+                    LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(6f) })
+                appRow.addView(cell, LinearLayout.LayoutParams(0, MP, 1f))
+            }
+        }
+        appsCard.addView(appRow, LinearLayout.LayoutParams(MP, 0, 1f))
+        editOverlay.addView(appsCard, lp(620f, 270f, 590f, 220f))
     }
 
     private fun togglePlayback() {
@@ -639,18 +730,32 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun multimediaButton(panel: LinearLayout, caption: String, action: () -> Unit) {
-        val button = TextView(this).apply {
-            text = caption
+    private fun buildCarSettingsPage(panel: LinearLayout) {
+        panel.addView(label("Nombre para el saludo de HOME", 18f, textMuted), LinearLayout.LayoutParams(MP, px(28f)))
+        val nameInput = android.widget.EditText(this).apply {
+            setSingleLine(true)
+            setText(userName)
+            hint = "Escribe tu nombre"
+            setTextColor(Color.WHITE)
+            setHintTextColor(textMuted)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, 20f * ss)
+            background = rounded(0xFF152746.toInt(), 12f, strokeColor)
+            setPadding(px(12f), 0, px(12f), 0)
+        }
+        panel.addView(nameInput, LinearLayout.LayoutParams(MP, px(48f)))
+        val saveName = TextView(this).apply {
+            text = "GUARDAR NOMBRE"
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            background = rounded(0xFF263E68.toInt(), 18f, strokeColor)
-            setOnClickListener { action() }
+            background = rounded(0xFF304E81.toInt(), 16f)
+            setOnClickListener {
+                userName = nameInput.text.toString().trim()
+                prefs.edit().putString("user_name", userName).apply()
+                if (::greetingText.isInitialized) greetingText.text = greeting()
+                toast("Nombre guardado")
+            }
         }
-        panel.addView(button, LinearLayout.LayoutParams(MP, px(58f)).apply { topMargin = px(10f) })
-    }
-
-    private fun buildCarSettingsPage(panel: LinearLayout) {
+        panel.addView(saveName, LinearLayout.LayoutParams(MP, px(42f)).apply { topMargin = px(6f) })
         listOf("Aviso de límite de velocidad (90 km/h)", "Modo nocturno", "Mantener pantalla activa", "Usar ubicación GPS").forEachIndexed { index, caption ->
             val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
             row.addView(label(caption, 19f, Color.WHITE), LinearLayout.LayoutParams(0, MP, 1f))
@@ -673,28 +778,75 @@ class MainActivity : Activity() {
             val from = prefs.getString("trip_start_place", null) ?: "—"
             val to = when { tripActive -> "En curso · ${placeName ?: "ubicación GPS"}"; prefs.getString("trip_end_place", null) != null -> prefs.getString("trip_end_place", null)!!; else -> "—" }
             tripPageRoute.text = "Desde: $from\nHasta: $to"
-            tripPageDistance.text = "Recorrido: ${"%.1f".format(Locale.US, tripDistanceMeters / 1000f)} km"
-            tripPageSpeed.text = if (currentSpeedKmh > speedLimitKmh) "⚠ EXCESO · $currentSpeedKmh km/h (límite $speedLimitKmh)" else "Límite local: 90 km/h · Actual: $currentSpeedKmh km/h"
-            tripPageSpeed.setTextColor(if (currentSpeedKmh > speedLimitKmh) 0xFFFF7575.toInt() else Color.WHITE)
-            tripActionButton.text = if (tripActive) "FINALIZAR RECORRIDO" else "INICIAR RECORRIDO"
+            tripPageDistance.text = "RECORRIDO  ·  ${"%.1f".format(Locale.US, tripDistanceMeters / 1000f)} km"
+            val over = currentSpeedKmh > currentSpeedLimitKmh
+            tripPageSpeed.text = if (over) "⚠ EXCESO DE VELOCIDAD  ·  LÍMITE $currentSpeedLimitKmh km/h" else
+                "LÍMITE APROX.  ·  $currentSpeedLimitKmh km/h  ·  ${if (speedLimitFromMap) "© OpenStreetMap contributors" else "Referencia SV"}"
+            tripPageSpeed.setTextColor(if (over) 0xFFFF6868.toInt() else textMuted)
+            tripPageSpeed.background = rounded(if (over) 0x663D101A else Color.TRANSPARENT, 12f)
+            if (::tripSpeedometer.isInitialized) tripSpeedometer.setReading(currentSpeedKmh, currentSpeedLimitKmh)
+            tripActionButton.text = if (tripActive) "FINALIZAR RECORRIDO" else "ESPERANDO MOVIMIENTO GPS"
         }
     }
 
     private fun toggleTrip() {
         if (!tripActive) {
-            tripActive = true
-            tripDistanceMeters = 0f
-            tripLastPoint = currentLocation?.let { Location(it) }
-            prefs.edit().putBoolean("trip_active", true).putFloat("trip_distance_m", 0f)
-                .putString("trip_start_place", placeName ?: "Ubicación GPS actual")
-                .remove("trip_end_place").apply()
-        } else {
-            tripActive = false
-            tripLastPoint = null
-            prefs.edit().putBoolean("trip_active", false)
-                .putString("trip_end_place", placeName ?: "Ubicación GPS actual").apply()
-        }
+            val point = currentLocation
+            if (point == null) {
+                toast("Esperando una ubicación GPS para iniciar")
+                return
+            }
+            startTrip(point)
+        } else finishTrip(currentLocation)
         renderTabContent("VIAJE")
+    }
+
+    private fun startTrip(location: Location) {
+        tripActive = true
+        tripDistanceMeters = 0f
+        tripLastPoint = Location(location)
+        stationarySince = 0L
+        val start = placeName ?: locationLabel(location)
+        prefs.edit().putBoolean("trip_active", true).putFloat("trip_distance_m", 0f)
+            .putString("trip_start_place", start).remove("trip_end_place").apply()
+        renderTabContent("VIAJE")
+    }
+
+    private fun finishTrip(location: Location?) {
+        tripActive = false
+        tripLastPoint = null
+        movingGpsFixes = 0
+        stationarySince = 0L
+        val end = placeName ?: location?.let { locationLabel(it) } ?: "Ubicación GPS actual"
+        prefs.edit().putBoolean("trip_active", false).putString("trip_end_place", end)
+            .putFloat("trip_distance_m", tripDistanceMeters).apply()
+        renderTabContent("VIAJE")
+    }
+
+    private fun locationLabel(location: Location): String =
+        "GPS %.5f, %.5f".format(Locale.US, location.latitude, location.longitude)
+
+    private fun updateAutomaticTrip(location: Location) {
+        val now = SystemClock.elapsedRealtime()
+        when {
+            currentSpeedKmh >= 5 -> {
+                movingGpsFixes++
+                stationarySince = 0L
+                if (!tripActive && movingGpsFixes >= 3) startTrip(location)
+            }
+            currentSpeedKmh < 2 -> {
+                movingGpsFixes = 0
+                if (tripActive) {
+                    if (stationarySince == 0L) stationarySince = now
+                    else if (now - stationarySince >= TRIP_STOP_AFTER_STATIONARY_MS) finishTrip(location)
+                }
+            }
+            else -> {
+                movingGpsFixes = 0
+                stationarySince = 0L
+            }
+        }
+        if (tripActive) updateTripTracking(location)
     }
 
     private fun updateTripTracking(location: Location) {
@@ -709,9 +861,32 @@ class MainActivity : Activity() {
     }
 
     private fun updateSpeedWarning(speed: Int) {
-        val nowOver = speed > speedLimitKmh
-        if (nowOver && !overLimit) toast("Límite de referencia: 90 km/h")
+        val nowOver = speed > currentSpeedLimitKmh
+        if (nowOver && !overLimit) toast("Exceso sobre el límite aproximado de $currentSpeedLimitKmh km/h")
         overLimit = nowOver
+    }
+
+    private fun maybeLookupSpeedLimit(location: Location) {
+        val now = SystemClock.elapsedRealtime()
+        val previous = lastSpeedLimitLocation
+        if (speedLimitLookupInFlight) return
+        if (previous != null) {
+            val age = now - lastSpeedLimitLookupAt
+            val moved = location.distanceTo(previous) >= SPEED_LIMIT_REFRESH_DISTANCE_M
+            if (age < SPEED_LIMIT_MIN_INTERVAL_MS || (!moved && age < SPEED_LIMIT_MAX_INTERVAL_MS)) return
+        }
+
+        lastSpeedLimitLocation = Location(location)
+        lastSpeedLimitLookupAt = now
+        speedLimitLookupInFlight = true
+        tripInfoRepository.lookupSpeedLimit(location) { limit ->
+            speedLimitLookupInFlight = false
+            currentSpeedLimitKmh = limit ?: fallbackSpeedLimitKmh
+            speedLimitFromMap = limit != null
+            updateSpeedWarning(currentSpeedKmh)
+            if (::tripSpeedometer.isInitialized) tripSpeedometer.setReading(currentSpeedKmh, currentSpeedLimitKmh)
+            if (selectedTab == "VIAJE") renderTabContent("VIAJE")
+        }
     }
 
     private fun showManagerDialog() {
@@ -734,7 +909,7 @@ class MainActivity : Activity() {
     // ---- Reloj ----
 
     private fun buildClockCard() {
-        card(400f, 70f, 250f, 120f)
+        homeOnlyViews.add(card(970f, 70f, 290f, 75f))
 
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
@@ -743,28 +918,30 @@ class MainActivity : Activity() {
         val time = TextClock(this)
         time.format12Hour = "h:mm"
         time.format24Hour = "HH:mm"
-        styleClock(time, 64f, Color.WHITE, true)
+        styleClock(time, 44f, Color.WHITE, true)
         row.addView(time)
 
         val ampm = TextClock(this)
         ampm.format12Hour = "a"
         ampm.format24Hour = " "
-        styleClock(ampm, 28f, textMuted, false)
+        styleClock(ampm, 18f, textMuted, false)
         row.addView(
             ampm,
             LinearLayout.LayoutParams(WC, WC).apply {
-                leftMargin = px(10f)
-                bottomMargin = px(12f)
+                leftMargin = px(8f)
+                bottomMargin = px(8f)
             }
         )
-        root.addView(row, lp(418f, 82f, 220f, 72f))
+        root.addView(row, lp(990f, 72f, 245f, 46f))
+        homeOnlyViews.add(row)
 
-        dateText = label("", 26f, textMuted)
-        root.addView(dateText, lp(418f, 158f, 220f, 24f))
+        dateText = label("", 16f, textMuted)
+        root.addView(dateText, lp(990f, 119f, 245f, 20f))
+        homeOnlyViews.add(dateText)
     }
 
     private fun updateDate() {
-        val s = SimpleDateFormat("EEEE, d 'de' MMMM", Locale.forLanguageTag("es")).format(Date())
+        val s = SimpleDateFormat("EEE, d MMM", Locale.forLanguageTag("es")).format(Date())
             .replaceFirstChar { it.uppercase() }
         if (s != lastDate) {
             lastDate = s
@@ -811,18 +988,36 @@ class MainActivity : Activity() {
     }
 
     private fun buildWeatherCard() {
-        card(400f, 205f, 250f, 205f)
-        root.addView(label("CLIMA", 20f, textMuted, true), lp(418f, 218f, 200f, 28f))
-        val weatherIcon = label("⛅", 55f, Color.WHITE, true).apply { gravity = Gravity.CENTER }
-        root.addView(weatherIcon, lp(414f, 255f, 82f, 78f))
-        weatherValue = label(weatherLabel ?: "26°C · Parcialmente nublado", 22f, Color.WHITE, true)
-        root.addView(weatherValue, lp(505f, 266f, 130f, 56f))
-        root.addView(label("Parcialmente nublado", 18f, textMuted), lp(418f, 344f, 215f, 30f))
+        homeOnlyViews.add(card(710f, 145f, 550f, 430f))
+        val heading = label("CLIMA ACTUAL", 22f, textMuted, true)
+        root.addView(heading, lp(750f, 178f, 460f, 32f))
+        homeOnlyViews.add(heading)
+        val locationHeading = label("Ubicación actual", 18f, textMuted)
+        root.addView(locationHeading, lp(750f, 228f, 460f, 28f))
+        homeOnlyViews.add(locationHeading)
+        homeLocationText = label("Buscando ubicación…", 27f, Color.WHITE, true)
+        root.addView(homeLocationText, lp(750f, 262f, 460f, 52f))
+        homeOnlyViews.add(homeLocationText)
+        val weatherIcon = label("⛅", 88f, Color.WHITE, true).apply { gravity = Gravity.CENTER }
+        root.addView(weatherIcon, lp(785f, 338f, 140f, 122f))
+        homeOnlyViews.add(weatherIcon)
+        weatherValue = label("26°C", 64f, Color.WHITE, true)
+        root.addView(weatherValue, lp(955f, 357f, 260f, 82f))
+        homeOnlyViews.add(weatherValue)
+        weatherConditionText = label("Parcialmente nublado", 22f, textMuted)
+        root.addView(weatherConditionText, lp(955f, 438f, 260f, 36f))
+        homeOnlyViews.add(weatherConditionText)
     }
 
     private fun updateTripViews() {
         locationText.text = placeName ?: "Buscando ubicación…"
-        if (::weatherValue.isInitialized) weatherValue.text = weatherLabel ?: "26°C · Parcialmente nublado"
+        val gpsPlace = currentLocation?.let { "%.5f, %.5f".format(Locale.US, it.latitude, it.longitude) }
+        if (::homeLocationText.isInitialized) homeLocationText.text = placeName ?: gpsPlace ?: "Buscando ubicación…"
+        if (::weatherValue.isInitialized && ::weatherConditionText.isInitialized) {
+            val weather = (weatherLabel ?: "26°C · Parcialmente nublado").split(" · ", limit = 2)
+            weatherValue.text = weather.firstOrNull() ?: "26°C"
+            weatherConditionText.text = weather.getOrNull(1) ?: "Parcialmente nublado"
+        }
         if (selectedTab == "VIAJE") renderTabContent("VIAJE")
     }
 
@@ -956,6 +1151,7 @@ class MainActivity : Activity() {
     private fun buildMediaCard() {
         val card = LinearLayout(this)
         card.orientation = LinearLayout.VERTICAL
+        mediaCardView = card
         card.gravity = Gravity.CENTER_HORIZONTAL
         card.background = panelBg()
         val pad = px(24f)
@@ -992,13 +1188,13 @@ class MainActivity : Activity() {
         controls.orientation = LinearLayout.HORIZONTAL
         controls.gravity = Gravity.CENTER
 
-        val prev = iconView(R.drawable.ic_prev, 56f, null, 6f)
+        val prev = iconView(R.drawable.ic_prev, 76f, 0xFF1C3152.toInt(), 16f)
         prev.setOnClickListener {
             controller?.transportControls?.skipToPrevious() ?: sendMediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
         }
-        controls.addView(prev, LinearLayout.LayoutParams(px(56f), px(56f)))
+        controls.addView(prev, LinearLayout.LayoutParams(px(76f), px(76f)))
 
-        playBtn = iconView(R.drawable.ic_play, 72f, null, 17f, blue)
+        playBtn = iconView(R.drawable.ic_play, 100f, null, 24f, blue)
         playBtn.background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(0x00000000)
@@ -1016,22 +1212,23 @@ class MainActivity : Activity() {
         }
         controls.addView(
             playBtn,
-            LinearLayout.LayoutParams(px(72f), px(72f)).apply {
-                leftMargin = px(28f)
-                rightMargin = px(28f)
+            LinearLayout.LayoutParams(px(100f), px(100f)).apply {
+                leftMargin = px(32f)
+                rightMargin = px(32f)
             }
         )
 
-        val next = iconView(R.drawable.ic_next, 56f, null, 6f)
+        val next = iconView(R.drawable.ic_next, 76f, 0xFF1C3152.toInt(), 16f)
         next.setOnClickListener {
             controller?.transportControls?.skipToNext() ?: sendMediaKey(KeyEvent.KEYCODE_MEDIA_NEXT)
         }
-        controls.addView(next, LinearLayout.LayoutParams(px(56f), px(56f)))
+        controls.addView(next, LinearLayout.LayoutParams(px(76f), px(76f)))
 
         card.addView(controls, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(12f) })
 
         // Ocupa toda la columna derecha (antes compartía el espacio con Mantenimiento)
         root.addView(card, lp(950f, 70f, 310f, 490f))
+        multimediaViews.add(card)
         val edit = TextView(this).apply {
             text = "✎"
             gravity = Gravity.CENTER
@@ -1042,7 +1239,9 @@ class MainActivity : Activity() {
                 if (selectedTab == "HOME") showManager() else showManagerDialog()
             }
         }
+        mediaEditButton = edit
         root.addView(edit, lp(1212f, 78f, 40f, 40f))
+        multimediaViews.add(edit)
     }
 
     /** Respaldo para apps de música Bluetooth que no publican una sesión de medios. */
@@ -1646,10 +1845,6 @@ class MainActivity : Activity() {
         isPlaying = false
         playBtn.setImageResource(R.drawable.ic_play)
         setArt(null)
-        if (::mediaPageTitle.isInitialized) {
-            mediaPageTitle.text = "Sin reproducción"
-            mediaPageArtist.text = artistText.text
-        }
         updateProgress()
     }
 
@@ -1664,10 +1859,6 @@ class MainActivity : Activity() {
             ?: md.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
             ?: md.getString(MediaMetadata.METADATA_KEY_ALBUM)
             ?: ""
-        if (::mediaPageTitle.isInitialized) {
-            mediaPageTitle.text = titleText.text
-            mediaPageArtist.text = artistText.text
-        }
         durationMs = md.getLong(MediaMetadata.METADATA_KEY_DURATION)
         val bmp: Bitmap? = md.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: md.getBitmap(MediaMetadata.METADATA_KEY_ART)
@@ -1742,5 +1933,9 @@ class MainActivity : Activity() {
         const val ICON_ID = 7001
         const val NAME_ID = 7002
         const val ART_SIZE = 220f
+        const val TRIP_STOP_AFTER_STATIONARY_MS = 5 * 60 * 1000L
+        const val SPEED_LIMIT_MIN_INTERVAL_MS = 60 * 1000L
+        const val SPEED_LIMIT_MAX_INTERVAL_MS = 5 * 60 * 1000L
+        const val SPEED_LIMIT_REFRESH_DISTANCE_M = 500f
     }
 }
