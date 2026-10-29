@@ -67,7 +67,7 @@ private const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
 private const val TABS_Y = 12f
 private const val TABS_H = 52f
 private const val CONTENT_Y = 78f
-private const val CARD_H = 380f
+private const val CARD_H = 544f
 private const val BAR_Y = 636f
 private const val BAR_H = 68f
 private const val VEHICLE_X = 20f
@@ -1408,7 +1408,7 @@ class MainActivity : Activity() {
 
         card.addView(controls, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(22f) })
 
-        // Ocupa toda la columna derecha, a la altura de las tarjetas y del dock.
+        // Ocupa toda la columna derecha, a la altura de las tarjetas principales.
         root.addView(card, lp(MEDIA_X, CONTENT_Y, MEDIA_W, MEDIA_H))
         val edit = TextView(this).apply {
             text = "✎"
