@@ -68,9 +68,6 @@ private const val TABS_Y = 12f
 private const val TABS_H = 52f
 private const val CONTENT_Y = 78f
 private const val CARD_H = 380f
-private const val DOCK_Y = 472f
-private const val DOCK_H = 150f
-private const val DOCK_W = 862f
 private const val BAR_Y = 636f
 private const val BAR_H = 68f
 private const val VEHICLE_X = 20f
@@ -82,7 +79,6 @@ private const val CONNECT_W = 390f
 private const val MEDIA_X = CONNECT_X
 private const val MEDIA_W = CONNECT_W
 private const val MEDIA_H = 544f
-private const val DOCK_SLOTS = 4
 
 private data class PanelRegion(val id: String, val left: Float, val top: Float, val width: Float, val height: Float)
 
@@ -136,7 +132,6 @@ class MainActivity : Activity() {
     private lateinit var blackout: View
     private lateinit var drawer: FrameLayout
     private lateinit var drawerGrid: GridView
-    private lateinit var recentDock: LinearLayout
     private lateinit var editOverlay: FrameLayout
     private lateinit var tabsBar: LinearLayout
     private lateinit var bottomBar: LinearLayout
@@ -198,7 +193,6 @@ class MainActivity : Activity() {
         PanelRegion("vehicle", VEHICLE_X, CONTENT_Y, VEHICLE_W, CARD_H),
         PanelRegion("clock", MID_X, CONTENT_Y, MID_W, CARD_H),
         PanelRegion("connect", CONNECT_X, CONTENT_Y, CONNECT_W, CARD_H),
-        PanelRegion("dock", VEHICLE_X, DOCK_Y, DOCK_W, DOCK_H),
         PanelRegion("media", MEDIA_X, CONTENT_Y, MEDIA_W, MEDIA_H),
         PanelRegion("bottom", 20f, BAR_Y, 1240f, BAR_H)
     )
@@ -531,7 +525,6 @@ class MainActivity : Activity() {
         buildTabs()
         buildClockCard()
         buildCarConnectCard()
-        buildDockCard()
         buildMediaCard()
         buildDrawer()
         buildBottomBar()
@@ -554,7 +547,6 @@ class MainActivity : Activity() {
     }
 
     private fun refreshDynamic() {
-        refreshRecentDock()
         setupMedia()
         updateCarConnectCard()
         applyNight()
@@ -1313,96 +1305,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---- Dock de apps ----
-
-    private fun dockCell(name: String, icon: ImageView, action: () -> Unit): LinearLayout {
-        val cell = LinearLayout(this)
-        cell.orientation = LinearLayout.VERTICAL
-        cell.gravity = Gravity.CENTER
-        cell.isClickable = true
-        cell.setOnClickListener { action() }
-        cell.addView(icon, LinearLayout.LayoutParams(px(72f), px(72f)))
-        val t = label(name, 20f, Color.WHITE)
-        t.gravity = Gravity.CENTER
-        cell.addView(t, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(10f) })
-        return cell
-    }
-
-    private fun buildDockCard() {
-        val dock = LinearLayout(this)
-        dock.orientation = LinearLayout.HORIZONTAL
-        dock.gravity = Gravity.CENTER
-        dock.background = panelBg(24f, 0xE63A4550.toInt(), 0xE62A323C.toInt())
-
-        recentDock = LinearLayout(this)
-        recentDock.orientation = LinearLayout.HORIZONTAL
-        recentDock.gravity = Gravity.CENTER
-        dock.addView(recentDock, LinearLayout.LayoutParams(0, MP, DOCK_SLOTS.toFloat()))
-
-        val appsIcon = iconView(R.drawable.ic_apps, 72f, 0xFF2F4A78.toInt(), 16f)
-        dock.addView(dockCell("Apps", appsIcon) { toggleDrawer() }, LinearLayout.LayoutParams(0, MP, 1f))
-        root.addView(dock, lp(VEHICLE_X, DOCK_Y, DOCK_W, DOCK_H))
-        refreshRecentDock()
-    }
-
-    /**
-     * El dock muestra las últimas apps abiertas desde el launcher y, si faltan, completa con
-     * Spotify, YouTube, Mensajes y Android Auto (ZLINK). El último espacio siempre abre el cajón.
-     */
-    private fun refreshRecentDock() {
-        if (!::recentDock.isInitialized) return
-        recentDock.removeAllViews()
-        val saved = prefs.getString("recent_packages", "")!!.split("|").filter { it.isNotBlank() }
-        val launcherApps = appCatalog.loadLauncherApps().associateBy { it.component.packageName }
-        val carIntegrationPkg = findCarIntegration()?.packageName
-        val recent = saved.distinct().mapNotNull { launcherApps[it] }
-        val defaults = mutableListOf<InstalledApp>()
-        launcherApps["com.spotify.music"]?.let { defaults.add(it) }
-        launcherApps["com.google.android.youtube"]?.let { defaults.add(it) }
-        defaultSmsPackage()?.let { launcherApps[it] }?.let { defaults.add(it) }
-        carIntegrationPkg?.let { launcherApps[it] }?.let { defaults.add(it) }
-        val chosen = (recent.take(DOCK_SLOTS) + defaults)
-            .distinctBy { it.component.packageName }
-            .take(DOCK_SLOTS)
-            .map { if (it.component.packageName == carIntegrationPkg) it.copy(label = "Android Auto") else it }
-        if (chosen.isEmpty()) {
-            val hint = label("Abre una app para fijarla aquí", 18f, textMuted)
-            hint.gravity = Gravity.CENTER
-            recentDock.addView(hint, LinearLayout.LayoutParams(MP, MP))
-            return
-        }
-        for (slot in 0 until DOCK_SLOTS) {
-            val app = chosen.getOrNull(slot)
-            if (app == null) {
-                // Espacio vacío: mantiene las columnas alineadas con el botón "Apps".
-                recentDock.addView(View(this), LinearLayout.LayoutParams(0, MP, 1f))
-                continue
-            }
-            val cell = LinearLayout(this)
-            cell.orientation = LinearLayout.VERTICAL
-            cell.gravity = Gravity.CENTER
-            cell.isClickable = true
-            cell.setOnClickListener { launchComponent(app.component) }
-            val icon = ImageView(this)
-            icon.setImageDrawable(app.icon)
-            icon.scaleType = ImageView.ScaleType.FIT_CENTER
-            roundClip(icon, 0.22f)
-            cell.addView(icon, LinearLayout.LayoutParams(px(72f), px(72f)))
-            val title = label(app.label, 20f, Color.WHITE)
-            title.gravity = Gravity.CENTER
-            cell.addView(title, LinearLayout.LayoutParams(MP, WC).apply { topMargin = px(10f) })
-            recentDock.addView(cell, LinearLayout.LayoutParams(0, MP, 1f))
-        }
-    }
-
-    private fun rememberRecentPackage(pkg: String) {
-        if (pkg == packageName) return
-        val current = prefs.getString("recent_packages", "")!!.split("|").filter { it.isNotBlank() }
-        val updated = (listOf(pkg) + current.filterNot { it == pkg }).take(12)
-        prefs.edit().putString("recent_packages", updated.joinToString("|")).apply()
-        if (uiReady) refreshRecentDock()
-    }
-
     private fun bindAppIcon(v: ImageView, pkg: String?, fallbackRes: Int, fallbackBg: Int) {
         val icon: Drawable? = if (pkg == null) {
             null
@@ -1681,7 +1583,6 @@ class MainActivity : Activity() {
         "vehicle" -> "Vehículo y velocímetro"
         "clock" -> "Hora, fecha, ubicación y clima"
         "connect" -> "Conexión del vehículo"
-        "dock" -> "Accesos rápidos"
         "media" -> "Reproductor multimedia"
         "bottom" -> "Barra inferior"
         else -> "Panel"
@@ -1920,9 +1821,8 @@ class MainActivity : Activity() {
                 val i = Intent(Intent.ACTION_MAIN)
                     .addCategory(Intent.CATEGORY_LAUNCHER)
                     .setComponent(app.component)
-                if (startSafe(i)) {
-                    rememberRecentPackage(app.component.packageName)
-                    closeDrawer()
+                    if (startSafe(i)) {
+                        closeDrawer()
                 }
             }
         }
@@ -1991,9 +1891,7 @@ class MainActivity : Activity() {
 
     private fun launchPackage(pkg: String): Boolean {
         val i = packageManager.getLaunchIntentForPackage(pkg) ?: return false
-        val launched = startSafe(i)
-        if (launched) rememberRecentPackage(pkg)
-        return launched
+        return startSafe(i)
     }
 
     private fun findMusicBt(): ComponentName? = appCatalog.find(InstalledAppsCatalog.MUSIC_BT_EXACT, InstalledAppsCatalog.MUSIC_BT_CONTAINS)
@@ -2008,9 +1906,7 @@ class MainActivity : Activity() {
     )
 
     private fun launchComponent(c: ComponentName): Boolean {
-        val launched = startSafe(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(c))
-        if (launched) rememberRecentPackage(c.packageName)
-        return launched
+        return startSafe(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(c))
     }
 
     /** Música: primero "Music BT"; si no está instalada, Spotify y luego cualquier reproductor. */
